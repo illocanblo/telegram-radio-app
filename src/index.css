@@ -103,23 +103,25 @@ body {
   line-height: 1.3; 
   display: -webkit-box; 
   -webkit-line-clamp: 2; 
+  line-clamp: 2; /* ← добавили стандартное свойство */
   -webkit-box-orient: vertical; 
   overflow: hidden; 
 }
 
 /* --- СПИСОК ТРЕКОВ --- */
 .tracks-list {
-  padding: 0 var(--tg-content-right, 16px) 0 var(--tg-content-left, 16px);
+  padding: 0 20px 20px; /* Добавили боковые отступы 20px и нижний 20px */
 }
 
 .track-item {
   display: flex;
   align-items: center;
-  padding: 12px 0;
+  padding: 14px 8px; /* Увеличили вертикальный padding для удобства нажатия */
   border-bottom: 1px solid #2a2a2a;
   cursor: pointer;
   font-size: 14px;
   transition: color 0.2s;
+  min-height: 48px; /* Минимальная высота для удобного тапа */
 }
 .track-item:hover { 
   color: var(--accent); 
@@ -130,9 +132,10 @@ body {
 }
 
 .track-num { 
-  width: 30px; 
+  width: 36px; /* Немного шире для выравнивания */
   color: var(--text-secondary); 
-  font-size: 13px; 
+  font-size: 13px;
+  flex-shrink: 0; /* Чтобы номер не сжимался */
 }
 
 /* --- ЗАКРЕПЛЕННЫЙ ПЛЕЕР ВНИЗУ --- */
@@ -235,7 +238,7 @@ body {
 
 /* Блок с деталями альбома */
 .album-details {
-  padding: 16px;
+  padding: 16px 20px; /* Увеличили боковые отступы */
   text-align: center;
   border-bottom: 1px solid #333;
   margin-bottom: 8px;
