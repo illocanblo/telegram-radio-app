@@ -52,6 +52,9 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [autoPlayPending, setAutoPlayPending] = useState(false)
+  
+  // Состояние для сворачивания/разворачивания длинного описания
+  const [descExpanded, setDescExpanded] = useState(false)
 
   const audioRef = useRef(null)
   
@@ -61,6 +64,7 @@ export default function App() {
     { email: 'sobrio21@yandex.ru', name: 'Sobrio21' },
   ]
 
+  // 1. Загрузка списка альбомов при старте
   useEffect(() => {
     async function fetchAlbums() {
       try {
@@ -85,6 +89,7 @@ export default function App() {
     fetchAlbums()
   }, [])
 
+  // Автоплей
   useEffect(() => {
     if (autoPlayPending && audioRef.current) {
       audioRef.current.play()
@@ -100,14 +105,13 @@ export default function App() {
     }
   }, [currentTrack, autoPlayPending])
 
-    function extractTracks(data, album) {
-    // Если данных нет или нет массива файлов, возвращаем пустой массив
+  // Вспомогательная функция: извлечь треки из метаданных
+  function extractTracks(data, album) {
     if (!data || !Array.isArray(data.files)) return []
 
     const audioFiles = data.files.filter(f => 
       ['VBR MP3', 'MP3', 'Ogg Vorbis', 'M4A', 'AAC', 'Flac', 'Shorten'].includes(f.format)
     )
-    // ... остальной код функции без изменений ...
 
     const uniqueTracksMap = new Map()
     audioFiles.forEach(f => {
@@ -128,9 +132,12 @@ export default function App() {
     return tracks
   }
 
-    async function openAlbum(album, autoPlay = false) {
+  // 2. Открытие альбома (ИСПРАВЛЕНО: убран дублирующийся блок кода)
+  async function openAlbum(album, autoPlay = false) {
     setLoading(true)
-    setError('') // Сбрасываем предыдущие ошибки
+    setError('')
+    setDescExpanded(false) // Сбрасываем состояние описания при открытии нового альбома
+    
     try {
       const res = await fetch(`https://archive.org/metadata/${album.identifier}`)
       const data = await res.json()
@@ -139,12 +146,10 @@ export default function App() {
 
       // 🌟 УМНАЯ ОЧИСТКА: Если аудиофайлов нет, удаляем альбом из списка
       if (tracks.length === 0) {
-        // Удаляем этот альбом из состояния albums
         setAlbums(prevAlbums => prevAlbums.filter(a => a.identifier !== album.identifier))
-        // Показываем информативное сообщение
         setError(`Релиз "${album.title || album.identifier}" не содержит аудиофайлов и был скрыт из списка.`)
         setLoading(false)
-        return // Прерываем выполнение, не переключая экран
+        return
       }
 
       const albumData = { 
@@ -173,34 +178,7 @@ export default function App() {
     }
   }
 
-      const albumData = { 
-        ...album, 
-        cover: `https://archive.org/services/img/${album.identifier}`,
-        description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
-      }
-
-      setViewedAlbum(albumData)
-      setViewedTracks(tracks)
-      setView('tracks')
-      
-      if (autoPlay) {
-        setAllTracks(tracks)
-        setPlaylist(tracks)
-        setCurrentAlbum(albumData)
-        setCurrentTrack(tracks[0])
-        setAutoPlayPending(true)
-        if (isShuffle) setIsShuffle(false)
-      }
-    } catch (e) {
-      console.error('Ошибка при загрузке альбома:', e)
-      const errorMessage = e.message || 'Неизвестная ошибка'
-      setError(`Ошибка загрузки треков альбома: ${errorMessage}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Запуск трека БЕЗ автоматической синхронизации плейлиста
+  // 3. Управление воспроизведением
   function playTrack(track, autoPlay = false) {
     setCurrentTrack(track)
     if (autoPlay) {
@@ -211,9 +189,7 @@ export default function App() {
     }
   }
 
-  // Синхронизация плейлиста при явном клике на трек
   function playTrackFromViewedAlbum(track) {
-    // Если трек из просматриваемого альбома, а играет другой — синхронизируем
     if (viewedAlbum && currentAlbum?.identifier !== viewedAlbum.identifier) {
       setAllTracks(viewedTracks)
       setPlaylist(viewedTracks)
@@ -278,6 +254,7 @@ export default function App() {
     return () => audio?.removeEventListener('ended', handleEnded)
   }, [currentTrack, playlist])
 
+  // --- РЕНДЕР ---
   return (
     <div>
       <audio 
@@ -287,6 +264,7 @@ export default function App() {
         onPause={() => setIsPlaying(false)}
       />
 
+      {/* Липкая шапка */}
       <div className="header">
         {view === 'tracks' ? (
           <>
@@ -305,6 +283,7 @@ export default function App() {
         )}
       </div>
 
+      {/* Экран списка альбомов */}
       {view === 'albums' && (
         <>
           {loading && <div className="loading">Загрузка альбомов...</div>}
@@ -343,20 +322,52 @@ export default function App() {
         </>
       )}
 
+      {/* Экран списка треков с HERO-секцией (новая красивая вёрстка) */}
       {view === 'tracks' && viewedAlbum && (
         <div className="tracks-view-container">
-          <div className="album-details">
+          <div className="album-hero">
+            {/* Размытый фон из обложки */}
             <img 
-              className="album-details-cover" 
+              className="album-hero-bg" 
               src={viewedAlbum.cover} 
-              alt={viewedAlbum.title}
-              onError={(e) => { e.target.src = 'https://via.placeholder.com/200/333/fff?text=No+Cover' }}
+              alt="" 
+              aria-hidden="true"
+              onError={(e) => { e.target.src = 'https://via.placeholder.com/400/333/fff?text=No+Cover' }}
             />
-            <div className="album-description">
-              {viewedAlbum.description}
+            {/* Градиентный фейд в цвет темы */}
+            <div className="album-hero-overlay"></div>
+
+            {/* Чёткий контент поверх */}
+            <div className="album-hero-content">
+              <img 
+                className="album-hero-cover" 
+                src={viewedAlbum.cover} 
+                alt={viewedAlbum.title}
+                onError={(e) => { e.target.src = 'https://via.placeholder.com/240/333/fff?text=No+Cover' }}
+              />
+              <h2 className="album-hero-title">{viewedAlbum.title}</h2>
+              <div className="album-hero-meta">
+                {viewedAlbum.description && viewedAlbum.description !== 'Описание отсутствует' && (
+                  <div className="album-description">
+                    {viewedAlbum.description.length > 220 && !descExpanded
+                      ? viewedAlbum.description.slice(0, 220) + '…'
+                      : viewedAlbum.description}
+                    
+                    {viewedAlbum.description.length > 220 && (
+                      <button 
+                        className="desc-toggle" 
+                        onClick={() => setDescExpanded(!descExpanded)}
+                      >
+                        {descExpanded ? 'Свернуть ▲' : 'Показать полностью ▼'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
+          {/* Список треков */}
           <div className="tracks-list">
             <h3 style={{ marginBottom: '12px', fontSize: '15px', color: 'var(--text-secondary)' }}>Треки</h3>
             {loading && <div className="loading">Загрузка треков...</div>}
@@ -376,6 +387,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Закрепленный плеер внизу */}
       {currentTrack && currentAlbum && (
         <div className="sticky-player">
           <div 
