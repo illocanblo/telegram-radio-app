@@ -1,3 +1,5 @@
+/* ПРОВЕРКА ОБНОВЛЕНИЯ V2 */
+
 import { useState, useRef, useEffect } from 'react'
 
 function shuffleArray(array) {
