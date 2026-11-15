@@ -1,4 +1,4 @@
-/* ПРОВЕРКА ОБНОВЛЕНИЯ V2 */
+/* ПРОВЕРКА ОБНОВЛЕНИЯ V3 */
 
 import { useState, useRef, useEffect } from 'react'
 
@@ -14,11 +14,8 @@ function shuffleArray(array) {
 function cleanDescription(raw) {
   if (!raw) return ''
   
-  // 1. Принудительно превращаем в строку. 
-  // Если это массив (частая особенность Archive.org), объединяем элементы через перенос строки.
   let text = Array.isArray(raw) ? raw.join('\n') : String(raw)
   
-  // 2. Теперь безопасно применяем все замены
   text = text
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(div|p|li|ul|ol|h[1-6])>/gi, '\n')
@@ -30,7 +27,6 @@ function cleanDescription(raw) {
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
   
-  // 3. Нормализуем пробелы и пустые строки
   text = text.split('\n').map(l => l.trim()).join('\n')
   text = text.replace(/\n{3,}/g, '\n\n')
   
@@ -54,8 +50,6 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [autoPlayPending, setAutoPlayPending] = useState(false)
-  
-  // Состояние для сворачивания/разворачивания длинного описания
   const [descExpanded, setDescExpanded] = useState(false)
 
   const audioRef = useRef(null)
@@ -66,7 +60,6 @@ export default function App() {
     { email: 'sobrio21@yandex.ru', name: 'Sobrio21' },
   ]
 
-  // 1. Загрузка списка альбомов при старте
   useEffect(() => {
     async function fetchAlbums() {
       try {
@@ -91,7 +84,6 @@ export default function App() {
     fetchAlbums()
   }, [])
 
-  // Автоплей
   useEffect(() => {
     if (autoPlayPending && audioRef.current) {
       audioRef.current.play()
@@ -107,7 +99,6 @@ export default function App() {
     }
   }, [currentTrack, autoPlayPending])
 
-  // Вспомогательная функция: извлечь треки из метаданных
   function extractTracks(data, album) {
     if (!data || !Array.isArray(data.files)) return []
 
@@ -134,11 +125,10 @@ export default function App() {
     return tracks
   }
 
-  // 2. Открытие альбома (ИСПРАВЛЕНО: убран дублирующийся блок кода)
   async function openAlbum(album, autoPlay = false) {
     setLoading(true)
     setError('')
-    setDescExpanded(false) // Сбрасываем состояние описания при открытии нового альбома
+    setDescExpanded(false)
     
     try {
       const res = await fetch(`https://archive.org/metadata/${album.identifier}`)
@@ -146,7 +136,6 @@ export default function App() {
 
       const tracks = extractTracks(data, album)
 
-      // 🌟 УМНАЯ ОЧИСТКА: Если аудиофайлов нет, удаляем альбом из списка
       if (tracks.length === 0) {
         setAlbums(prevAlbums => prevAlbums.filter(a => a.identifier !== album.identifier))
         setError(`Релиз "${album.title || album.identifier}" не содержит аудиофайлов и был скрыт из списка.`)
@@ -155,11 +144,11 @@ export default function App() {
       }
 
       const albumData = { 
-  ...album, 
-  cover: `https://archive.org/services/img/${album.identifier}`,
-  creator: data.metadata.creator || '',
-  description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
-}
+        ...album, 
+        cover: `https://archive.org/services/img/${album.identifier}`,
+        creator: data.metadata.creator || '',
+        description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
+      }
 
       setViewedAlbum(albumData)
       setViewedTracks(tracks)
@@ -181,7 +170,6 @@ export default function App() {
     }
   }
 
-  // 3. Управление воспроизведением
   function playTrack(track, autoPlay = false) {
     setCurrentTrack(track)
     if (autoPlay) {
@@ -267,13 +255,12 @@ export default function App() {
         onPause={() => setIsPlaying(false)}
       />
 
-      {/* Липкая шапка */}
+      {/* Липкая шапка (ИСПРАВЛЕНО: корректный тернарный оператор) */}
       <div className="header">
-        {view === 'tracks' && (
-  <button className="floating-back-btn" onClick={() => setView('albums')}>
-    ← Назад к альбомам
-  </button>
-)}
+        {view === 'tracks' ? (
+          <button className="floating-back-btn" onClick={() => setView('albums')}>
+            ← Назад к альбомам
+          </button>
         ) : (
           <>
             <h1>📻 Nenormalizm Recs</h1>
@@ -285,12 +272,12 @@ export default function App() {
       {/* Экран списка альбомов */}
       {view === 'albums' && (
         <>
-{loading && (
-  <div className="loader-container">
-    <div className="loader"></div>
-    <p className="loader-text">Собираем коллекцию из архива...</p>
-  </div>
-)}
+          {loading && (
+            <div className="loader-container">
+              <div className="loader"></div>
+              <p className="loader-text">Собираем коллекцию из архива...</p>
+            </div>
+          )}
           {error && <div className="error">{error}</div>}
           <div className="albums-grid">
             {albums.map(album => {
@@ -326,11 +313,10 @@ export default function App() {
         </>
       )}
 
-      {/* Экран списка треков с HERO-секцией (новая красивая вёрстка) */}
+      {/* Экран списка треков с HERO-секцией */}
       {view === 'tracks' && viewedAlbum && (
         <div className="tracks-view-container">
           <div className="album-hero">
-            {/* Размытый фон из обложки */}
             <img 
               className="album-hero-bg" 
               src={viewedAlbum.cover} 
@@ -338,10 +324,8 @@ export default function App() {
               aria-hidden="true"
               onError={(e) => { e.target.src = 'https://via.placeholder.com/400/333/fff?text=No+Cover' }}
             />
-            {/* Градиентный фейд в цвет темы */}
             <div className="album-hero-overlay"></div>
 
-            {/* Чёткий контент поверх */}
             <div className="album-hero-content">
               <img 
                 className="album-hero-cover" 
@@ -350,8 +334,8 @@ export default function App() {
                 onError={(e) => { e.target.src = 'https://via.placeholder.com/240/333/fff?text=No+Cover' }}
               />
               {viewedAlbum.creator && (
-  <div className="album-hero-subtitle">{viewedAlbum.creator}</div>
-)}
+                <div className="album-hero-subtitle">{viewedAlbum.creator}</div>
+              )}
               <div className="album-hero-meta">
                 {viewedAlbum.description && viewedAlbum.description !== 'Описание отсутствует' && (
                   <div className="album-description">
@@ -376,12 +360,12 @@ export default function App() {
           {/* Список треков */}
           <div className="tracks-list">
             <h3 style={{ marginBottom: '12px', fontSize: '15px', color: 'var(--text-secondary)' }}>Треки</h3>
-{loading && (
-  <div className="loader-container">
-    <div className="loader"></div>
-    <p className="loader-text">Готовим треклист и метаданные...</p>
-  </div>
-)}
+            {loading && (
+              <div className="loader-container">
+                <div className="loader"></div>
+                <p className="loader-text">Готовим треклист и метаданные...</p>
+              </div>
+            )}
             {error && <div className="error">{error}</div>}
             
             {!loading && !error && viewedTracks.map((track, index) => (
