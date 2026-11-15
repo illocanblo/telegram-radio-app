@@ -30,8 +30,9 @@ body {
 /* --- ЛИПКАЯ ШАПКА (Исправление проблемы со скроллом) --- */
 .header {
   padding: 12px 16px;
+  padding-top: 110px; /* Фиксированный отступ: заведомо больше шапки Telegram (~56px) + статус-бара (~47px) */
   position: sticky;
-  top: var(--tg-content-top, env(safe-area-inset-top)); /* ← ключевое исправление */
+  top: 0;
   background: var(--bg);
   z-index: 10;
   border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -434,4 +435,27 @@ body {
 @keyframes pulse {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
+}
+
+.album-hero-subtitle {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.floating-back-btn {
+  position: fixed;
+  top: calc(110px + env(safe-area-inset-top, 0px)); /* под шапкой Telegram */
+  left: 16px;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: var(--accent);
+  border: none;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }

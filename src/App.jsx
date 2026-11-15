@@ -155,10 +155,11 @@ export default function App() {
       }
 
       const albumData = { 
-        ...album, 
-        cover: `https://archive.org/services/img/${album.identifier}`,
-        description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
-      }
+  ...album, 
+  cover: `https://archive.org/services/img/${album.identifier}`,
+  creator: data.metadata.creator || '',
+  description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
+}
 
       setViewedAlbum(albumData)
       setViewedTracks(tracks)
@@ -268,15 +269,11 @@ export default function App() {
 
       {/* Липкая шапка */}
       <div className="header">
-        {view === 'tracks' ? (
-          <>
-            <button className="back-btn" onClick={() => setView('albums')}>
-              ← Назад к альбомам
-            </button>
-            <h1 style={{ fontSize: '16px', fontWeight: '600', marginTop: '4px' }}>
-              {viewedAlbum?.title}
-            </h1>
-          </>
+        {view === 'tracks' && (
+  <button className="floating-back-btn" onClick={() => setView('albums')}>
+    ← Назад к альбомам
+  </button>
+)}
         ) : (
           <>
             <h1>📻 Nenormalizm Recs</h1>
@@ -352,7 +349,9 @@ export default function App() {
                 alt={viewedAlbum.title}
                 onError={(e) => { e.target.src = 'https://via.placeholder.com/240/333/fff?text=No+Cover' }}
               />
-              <h2 className="album-hero-title">{viewedAlbum.title}</h2>
+              {viewedAlbum.creator && (
+  <div className="album-hero-subtitle">{viewedAlbum.creator}</div>
+)}
               <div className="album-hero-meta">
                 {viewedAlbum.description && viewedAlbum.description !== 'Описание отсутствует' && (
                   <div className="album-description">
