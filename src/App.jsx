@@ -340,11 +340,11 @@ export default function App() {
 
       {/* Шапка — ТОЛЬКО на экране альбомов */}
       {view === 'albums' && (
-        <div className="header">
-          <h1>📻 Nenormalizm Recs</h1>
-          <p>{albums.length} альбомов из архива</p>
-        </div>
-      )}
+  <div className="header">
+    <h1>📻 Nenormalizm Recs</h1>
+    <p>{albums.length} альбомов из архива</p>
+  </div>
+)}
 
       {/* Плавающая кнопка назад — ТОЛЬКО на экране треков */}
       {view === 'tracks' ? (
