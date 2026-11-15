@@ -3,50 +3,63 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
-// --- Инициализация Telegram Web App ---
-if (window.Telegram && window.Telegram.WebApp) {
-  const tg = window.Telegram.WebApp;
-  tg.ready();
-  tg.expand();
+const root = document.documentElement
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null
 
-  const bg = tg.themeParams.bg_color || '#121212';
-  const text = tg.themeParams.text_color || '#ffffff';
-  document.documentElement.style.setProperty('--bg', bg);
-  document.documentElement.style.setProperty('--text', text);
+// Определяем, реально ли мы внутри клиента Telegram (а не в обычном браузере)
+const inTelegram = !!(tg && tg.platform && tg.platform !== 'unknown' && (tg.initData || tg.initDataUnsafe?.user))
+root.dataset.telegram = inTelegram ? '1' : '0'
 
-  tg.setHeaderColor(bg);
-  tg.setBackgroundColor(bg);
-  tg.disableVerticalSwipes();
-  // Настраиваем нативную кнопку "Назад" Telegram
-  tg.BackButton.onClick(() => {
-    // Это событие будет перехвачено в App.jsx через window.__onTelegramBack
-    if (window.__onTelegramBack) {
-      window.__onTelegramBack();
-    }
-  });
-
-  
-
-  // 🔑 Определяем, сколько места занимает шапка Telegram
-  function updateHeaderOffset() {
-    const isMobile = ['android', 'ios', 'iphone'].includes(tg.platform);
-    let offset = 0;
-    if (isMobile) {
-      // Реальные отступы от Telegram (статус-бар + шапка с кнопками)
-      const inset = tg.contentSafeAreaInset?.top ?? tg.safeAreaInset?.top;
-      offset = inset ?? 90; // fallback, если API не вернул данные
-    }
-    // На web / tdesktop / macos / windows шапки нет → offset = 0
-    document.documentElement.style.setProperty('--tg-header-offset', `${offset}px`);
-  }
-
-  updateHeaderOffset();
-  tg.onEvent('viewportChanged', updateHeaderOffset);
+// Тема до первого рендера — чтобы не было вспышки
+try {
+  const saved = JSON.parse(localStorage.getItem('nr.prefs.v1') || '{}')
+  const scheme = saved.theme || (tg && tg.colorScheme) || 'dark'
+  root.dataset.theme = scheme === 'light' ? 'light' : 'dark'
+} catch {
+  root.dataset.theme = 'dark'
 }
 
-// Рендер приложения
+/**
+ * Telegram рисует собственную шапку ПОВЕРХ WebView.
+ * contentSafeAreaInset включает и системный safe-area, и интерфейс Telegram.
+ * Вычитаем системную часть, т.к. её добавит CSS через env().
+ */
+function applyInsets() {
+  let uiTop = 0
+  let uiBottom = 0
+
+  if (inTelegram) {
+    const safe = tg.safeAreaInset || { top: 0, bottom: 0, left: 0, right: 0 }
+    const content = tg.contentSafeAreaInset
+    if (content && (content.top || content.bottom)) {
+      uiTop = Math.max(0, content.top - (safe.top || 0))
+      uiBottom = Math.max(0, content.bottom - (safe.bottom || 0))
+    } else {
+      // Старые клиенты без contentSafeAreaInset — консервативный запас под шапку
+      uiTop = 56
+      uiBottom = 0
+    }
+  }
+
+  root.style.setProperty('--tg-top', uiTop + 'px')
+  root.style.setProperty('--tg-bottom', uiBottom + 'px')
+}
+
+applyInsets()
+
+if (tg) {
+  try { tg.ready() } catch {}
+  try { tg.expand() } catch {}
+  try { tg.disableVerticalSwipes() } catch {}
+  const events = ['viewportChanged', 'safeAreaChanged', 'contentSafeAreaChanged', 'fullscreenChanged']
+  events.forEach((e) => { try { tg.onEvent(e, applyInsets) } catch {} })
+}
+
+window.addEventListener('resize', applyInsets)
+window.addEventListener('orientationchange', applyInsets)
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
-  </React.StrictMode>,
+  </React.StrictMode>
 )
