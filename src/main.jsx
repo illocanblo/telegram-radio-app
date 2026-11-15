@@ -18,21 +18,21 @@ if (window.Telegram && window.Telegram.WebApp) {
   tg.setBackgroundColor(bg);
   tg.disableVerticalSwipes();
 
-  // 🔑 Читаем реальные safe-зоны Telegram (включая его шапку)
-  function updateSafeArea() {
-    const c = tg.contentSafeAreaInset || tg.safeAreaInset || { top: 0, bottom: 0, left: 0, right: 0 };
-    const s = tg.safeAreaInset || { top: 0, bottom: 0 };
-    document.documentElement.style.setProperty('--tg-content-top', `${c.top}px`);
-    document.documentElement.style.setProperty('--tg-content-bottom', `${c.bottom}px`);
-    document.documentElement.style.setProperty('--tg-content-left', `${c.left}px`);
-    document.documentElement.style.setProperty('--tg-content-right', `${c.right}px`);
-    // Высота шапки Telegram = разница между contentSafe и safe
-    const headerH = Math.max(0, c.top - s.top);
-    document.documentElement.style.setProperty('--tg-header-height', `${headerH}px`);
+  // 🔑 Определяем, сколько места занимает шапка Telegram
+  function updateHeaderOffset() {
+    const isMobile = ['android', 'ios', 'iphone'].includes(tg.platform);
+    let offset = 0;
+    if (isMobile) {
+      // Реальные отступы от Telegram (статус-бар + шапка с кнопками)
+      const inset = tg.contentSafeAreaInset?.top ?? tg.safeAreaInset?.top;
+      offset = inset ?? 90; // fallback, если API не вернул данные
+    }
+    // На web / tdesktop / macos / windows шапки нет → offset = 0
+    document.documentElement.style.setProperty('--tg-header-offset', `${offset}px`);
   }
 
-  updateSafeArea();
-  tg.onEvent('viewportChanged', updateSafeArea); // обновлять при развороте/клавиатуре
+  updateHeaderOffset();
+  tg.onEvent('viewportChanged', updateHeaderOffset);
 }
 
 // Рендер приложения
