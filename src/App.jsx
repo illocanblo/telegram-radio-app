@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
 
-// Функция для визуального перемешивания массива (Алгоритм Фишера-Йейтса)
 function shuffleArray(array) {
   const newArr = [...array]
   for (let i = newArr.length - 1; i > 0; i--) {
@@ -10,7 +9,6 @@ function shuffleArray(array) {
   return newArr
 }
 
-// Превращает HTML-описание Archive.org в чистый текст с переносами строк
 function cleanDescription(raw) {
   if (!raw) return ''
   let text = raw
@@ -32,13 +30,13 @@ export default function App() {
   const [view, setView] = useState('albums')
   const [albums, setAlbums] = useState([])
   
-  // currentAlbum: альбом, трек из которого сейчас реально играет (для нижнего плеера)
   const [currentAlbum, setCurrentAlbum] = useState(null)
-  // viewedAlbum: альбом, список треков которого пользователь сейчас просматривает на экране
   const [viewedAlbum, setViewedAlbum] = useState(null)
   
   const [allTracks, setAllTracks] = useState([])
   const [playlist, setPlaylist] = useState([])
+  const [viewedTracks, setViewedTracks] = useState([])
+  
   const [currentTrack, setCurrentTrack] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [isShuffle, setIsShuffle] = useState(false)
@@ -54,7 +52,6 @@ export default function App() {
     { email: 'sobrio21@yandex.ru', name: 'Sobrio21' },
   ]
 
-  // 1. Загрузка списка альбомов при старте
   useEffect(() => {
     async function fetchAlbums() {
       try {
@@ -79,7 +76,6 @@ export default function App() {
     fetchAlbums()
   }, [])
 
-  // Автоплей: когда currentTrack меняется и есть флаг autoPlayPending, запускаем воспроизведение
   useEffect(() => {
     if (autoPlayPending && audioRef.current) {
       audioRef.current.play()
@@ -95,7 +91,30 @@ export default function App() {
     }
   }, [currentTrack, autoPlayPending])
 
-  // 2. Загрузка треков и метаданных конкретного альбома
+  function extractTracks(data, album) {
+    const audioFiles = data.files.filter(f => 
+      ['VBR MP3', 'MP3', 'Ogg Vorbis', 'M4A', 'AAC', 'Flac'].includes(f.format)
+    )
+
+    const uniqueTracksMap = new Map()
+    audioFiles.forEach(f => {
+      const parts = f.name.split('/')
+      const title = parts[parts.length - 1].replace(/\.[^/.]+$/, '')
+      if (!uniqueTracksMap.has(title)) {
+        uniqueTracksMap.set(title, {
+          ...f,
+          url: `https://archive.org/download/${album.identifier}/${f.name}`,
+          title: title,
+          folder: parts.length > 1 ? parts.slice(0, -1).join('/') : 'root'
+        })
+      }
+    })
+
+    const tracks = Array.from(uniqueTracksMap.values())
+    tracks.sort((a, b) => a.name.localeCompare(b.name))
+    return tracks
+  }
+
   async function openAlbum(album, autoPlay = false) {
     setLoading(true)
     setError('')
@@ -103,26 +122,7 @@ export default function App() {
       const res = await fetch(`https://archive.org/metadata/${album.identifier}`)
       const data = await res.json()
 
-      const audioFiles = data.files.filter(f => 
-        ['VBR MP3', 'MP3', 'Ogg Vorbis', 'M4A', 'AAC', 'Flac'].includes(f.format)
-      )
-
-      const uniqueTracksMap = new Map()
-      audioFiles.forEach(f => {
-        const parts = f.name.split('/')
-        const title = parts[parts.length - 1].replace(/\.[^/.]+$/, '')
-        if (!uniqueTracksMap.has(title)) {
-          uniqueTracksMap.set(title, {
-            ...f,
-            url: `https://archive.org/download/${album.identifier}/${f.name}`,
-            title: title,
-            folder: parts.length > 1 ? parts.slice(0, -1).join('/') : 'root'
-          })
-        }
-      })
-
-      const tracks = Array.from(uniqueTracksMap.values())
-      tracks.sort((a, b) => a.name.localeCompare(b.name))
+      const tracks = extractTracks(data, album)
 
       if (tracks.length === 0) {
         setError('В этом альбоме нет поддерживаемых аудиофайлов')
@@ -130,45 +130,54 @@ export default function App() {
         return
       }
 
-      setAllTracks(tracks)
-      setPlaylist(tracks)
-      
-      // ВСЕГДА обновляем viewedAlbum (то, что пользователь видит на экране)
       const albumData = { 
         ...album, 
         cover: `https://archive.org/services/img/${album.identifier}`,
         description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
       }
+
       setViewedAlbum(albumData)
+      setViewedTracks(tracks)
       setView('tracks')
       
-      // ТОЛЬКО если включен автоплей, обновляем currentAlbum (то, что играет в плеере)
       if (autoPlay) {
+        setAllTracks(tracks)
+        setPlaylist(tracks)
         setCurrentAlbum(albumData)
-        playTrack(tracks[0], true)
+        setCurrentTrack(tracks[0])
+        setAutoPlayPending(true)
+        if (isShuffle) setIsShuffle(false)
       }
     } catch (e) {
-      setError('Ошибка загрузки треков альбома')
+      console.error('Ошибка при загрузке альбома:', e)
+      const errorMessage = e.message || 'Неизвестная ошибка'
+      setError(`Ошибка загрузки треков альбома: ${errorMessage}`)
     } finally {
       setLoading(false)
     }
   }
 
-  // 3. Управление воспроизведением
+  // Запуск трека БЕЗ автоматической синхронизации плейлиста
   function playTrack(track, autoPlay = false) {
     setCurrentTrack(track)
-    
-    // При запуске трека синхронизируем currentAlbum с тем альбомом, который мы сейчас просматриваем
-    if (viewedAlbum) {
-      setCurrentAlbum(viewedAlbum)
-    }
-
     if (autoPlay) {
       setAutoPlayPending(true)
     } else {
       setIsPlaying(true)
       setTimeout(() => audioRef.current?.play(), 0)
     }
+  }
+
+  // Синхронизация плейлиста при явном клике на трек
+  function playTrackFromViewedAlbum(track) {
+    // Если трек из просматриваемого альбома, а играет другой — синхронизируем
+    if (viewedAlbum && currentAlbum?.identifier !== viewedAlbum.identifier) {
+      setAllTracks(viewedTracks)
+      setPlaylist(viewedTracks)
+      setCurrentAlbum(viewedAlbum)
+      if (isShuffle) setIsShuffle(false)
+    }
+    playTrack(track, true)
   }
 
   function togglePlay() {
@@ -226,7 +235,6 @@ export default function App() {
     return () => audio?.removeEventListener('ended', handleEnded)
   }, [currentTrack, playlist])
 
-  // --- РЕНДЕР ---
   return (
     <div>
       <audio 
@@ -236,7 +244,6 @@ export default function App() {
         onPause={() => setIsPlaying(false)}
       />
 
-      {/* Липкая шапка */}
       <div className="header">
         {view === 'tracks' ? (
           <>
@@ -244,7 +251,7 @@ export default function App() {
               ← Назад к альбомам
             </button>
             <h1 style={{ fontSize: '16px', fontWeight: '600', marginTop: '4px' }}>
-              {viewedAlbum?.title} {/* Показываем заголовок просматриваемого альбома */}
+              {viewedAlbum?.title}
             </h1>
           </>
         ) : (
@@ -255,14 +262,12 @@ export default function App() {
         )}
       </div>
 
-      {/* Экран списка альбомов */}
       {view === 'albums' && (
         <>
           {loading && <div className="loading">Загрузка альбомов...</div>}
           {error && <div className="error">{error}</div>}
           <div className="albums-grid">
             {albums.map(album => {
-              // Проверяем, играет ли сейчас трек из ЭТОГО альбома
               const isCurrentlyPlaying = currentAlbum?.identifier === album.identifier;
               return (
                 <div 
@@ -270,11 +275,9 @@ export default function App() {
                   className={`album-card ${isCurrentlyPlaying ? 'currently-playing' : ''}`}
                   onClick={() => {
                     if (isCurrentlyPlaying) {
-                      // Если альбом уже играет, просто показываем его треклист
                       setViewedAlbum(currentAlbum);
                       setView('tracks');
                     } else {
-                      // Иначе загружаем новый альбом для просмотра (без автоплея)
                       openAlbum(album, false);
                     }
                   }}
@@ -297,10 +300,8 @@ export default function App() {
         </>
       )}
 
-      {/* Экран списка треков с обложкой и описанием */}
       {view === 'tracks' && viewedAlbum && (
         <div className="tracks-view-container">
-          {/* Блок с деталями альбома */}
           <div className="album-details">
             <img 
               className="album-details-cover" 
@@ -313,17 +314,16 @@ export default function App() {
             </div>
           </div>
 
-          {/* Список треков */}
           <div className="tracks-list">
             <h3 style={{ marginBottom: '12px', fontSize: '15px', color: 'var(--text-secondary)' }}>Треки</h3>
             {loading && <div className="loading">Загрузка треков...</div>}
             {error && <div className="error">{error}</div>}
             
-            {!loading && !error && playlist.map((track, index) => (
+            {!loading && !error && viewedTracks.map((track, index) => (
               <div 
                 key={track.name} 
                 className={`track-item ${currentTrack?.name === track.name ? 'current' : ''}`}
-                onClick={() => playTrack(track, true)}
+                onClick={() => playTrackFromViewedAlbum(track)}
               >
                 <span className="track-num">{index + 1}</span>
                 <span className="track-title-text">{track.title}</span>
@@ -333,14 +333,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Закрепленный плеер внизу */}
       {currentTrack && currentAlbum && (
         <div className="sticky-player">
-          {/* Кликабельная область для возврата к альбому, который сейчас играет */}
           <div 
             className="player-info" 
             onClick={() => {
-              setViewedAlbum(currentAlbum); // Устанавливаем просматриваемый альбом равным играющему
+              setViewedAlbum(currentAlbum);
               setView('tracks');
             }}
             title="Нажмите, чтобы открыть список треков текущего альбома"
