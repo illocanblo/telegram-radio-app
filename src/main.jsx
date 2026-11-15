@@ -15,7 +15,7 @@ if (window.Telegram && window.Telegram.WebApp) {
   document.documentElement.style.setProperty('--bg', bg);
   document.documentElement.style.setProperty('--text', text);
 
-  // 🔑 Красим системную шапку Telegram в цвет фона приложения
+  // Красим системную шапку Telegram в цвет фона приложения
   tg.setHeaderColor(bg);
   tg.setBackgroundColor(bg);
 
@@ -23,13 +23,7 @@ if (window.Telegram && window.Telegram.WebApp) {
   tg.disableVerticalSwipes();
 }
 
-  // Подстраиваем цвета под тему пользователя (тёмная/светлая)
-  const bg = tg.themeParams.bg_color || '#0f0f0f';
-  const text = tg.themeParams.text_color || '#ffffff';
-  document.documentElement.style.setProperty('--bg', bg);
-  document.documentElement.style.setProperty('--text', text);
-}
-
+// Рендер приложения
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />
