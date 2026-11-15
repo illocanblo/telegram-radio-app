@@ -100,10 +100,14 @@ export default function App() {
     }
   }, [currentTrack, autoPlayPending])
 
-  function extractTracks(data, album) {
+    function extractTracks(data, album) {
+    // Если данных нет или нет массива файлов, возвращаем пустой массив
+    if (!data || !Array.isArray(data.files)) return []
+
     const audioFiles = data.files.filter(f => 
-      ['VBR MP3', 'MP3', 'Ogg Vorbis', 'M4A', 'AAC', 'Flac'].includes(f.format)
+      ['VBR MP3', 'MP3', 'Ogg Vorbis', 'M4A', 'AAC', 'Flac', 'Shorten'].includes(f.format)
     )
+    // ... остальной код функции без изменений ...
 
     const uniqueTracksMap = new Map()
     audioFiles.forEach(f => {
@@ -124,20 +128,50 @@ export default function App() {
     return tracks
   }
 
-  async function openAlbum(album, autoPlay = false) {
+    async function openAlbum(album, autoPlay = false) {
     setLoading(true)
-    setError('')
+    setError('') // Сбрасываем предыдущие ошибки
     try {
       const res = await fetch(`https://archive.org/metadata/${album.identifier}`)
       const data = await res.json()
 
       const tracks = extractTracks(data, album)
 
+      // 🌟 УМНАЯ ОЧИСТКА: Если аудиофайлов нет, удаляем альбом из списка
       if (tracks.length === 0) {
-        setError('В этом альбоме нет поддерживаемых аудиофайлов')
+        // Удаляем этот альбом из состояния albums
+        setAlbums(prevAlbums => prevAlbums.filter(a => a.identifier !== album.identifier))
+        // Показываем информативное сообщение
+        setError(`Релиз "${album.title || album.identifier}" не содержит аудиофайлов и был скрыт из списка.`)
         setLoading(false)
-        return
+        return // Прерываем выполнение, не переключая экран
       }
+
+      const albumData = { 
+        ...album, 
+        cover: `https://archive.org/services/img/${album.identifier}`,
+        description: cleanDescription(data.metadata.description) || 'Описание отсутствует'
+      }
+
+      setViewedAlbum(albumData)
+      setViewedTracks(tracks)
+      setView('tracks')
+      
+      if (autoPlay) {
+        setAllTracks(tracks)
+        setPlaylist(tracks)
+        setCurrentAlbum(albumData)
+        setCurrentTrack(tracks[0])
+        setAutoPlayPending(true)
+        if (isShuffle) setIsShuffle(false)
+      }
+    } catch (e) {
+      console.error('Ошибка при загрузке альбома:', e)
+      setError(`Ошибка загрузки треков альбома: ${e.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
 
       const albumData = { 
         ...album, 
