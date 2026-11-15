@@ -11,7 +11,13 @@ function shuffleArray(array) {
 
 function cleanDescription(raw) {
   if (!raw) return ''
-  let text = raw
+  
+  // 1. Принудительно превращаем в строку. 
+  // Если это массив (частая особенность Archive.org), объединяем элементы через перенос строки.
+  let text = Array.isArray(raw) ? raw.join('\n') : String(raw)
+  
+  // 2. Теперь безопасно применяем все замены
+  text = text
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(div|p|li|ul|ol|h[1-6])>/gi, '\n')
     .replace(/<[^>]+>/g, '')
@@ -21,8 +27,11 @@ function cleanDescription(raw) {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+  
+  // 3. Нормализуем пробелы и пустые строки
   text = text.split('\n').map(l => l.trim()).join('\n')
   text = text.replace(/\n{3,}/g, '\n\n')
+  
   return text.trim()
 }
 
