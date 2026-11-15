@@ -1,0 +1,308 @@
+:root {
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --surface-hover: #2a2a2a;
+  --text: #ffffff;
+  --text-secondary: #b3b3b3;
+  --accent: #1db954; /* Зеленый акцент, как у Spotify */
+  --accent-hover: #1ed760;
+}
+
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding-bottom: 140px; /* Отступ снизу, чтобы плеер не перекрывал последние треки */
+}
+
+/* --- ЛИПКАЯ ШАПКА (Исправление проблемы со скроллом) --- */
+.header {
+  padding: 12px 16px;
+  position: sticky; /* Делает элемент липким */
+  top: 0;           /* Прилипает к самому верху экрана */
+  background: rgba(18, 18, 18, 0.95);
+  backdrop-filter: blur(10px); /* Эффект размытия фона под шапкой */
+  z-index: 10;      /* Гарантирует, что шапка будет поверх треков */
+  border-bottom: 1px solid #333;
+}
+
+.header h1 { 
+  font-size: 20px; 
+  font-weight: 700; 
+}
+
+.header p { 
+  font-size: 13px; 
+  color: var(--text-secondary); 
+  margin-top: 4px; 
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+.back-btn:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* --- СЕТКА АЛЬБОМОВ --- */
+.albums-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+.album-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  position: relative; /* <-- ОБЯЗАТЕЛЬНО ДОБАВИТЬ */
+}
+.album-card:hover { 
+  background: var(--surface-hover); 
+}
+
+.album-cover {
+  width: 100%;
+  aspect-ratio: 1;
+  background: #333;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  object-fit: cover;
+}
+
+.album-title { 
+  font-size: 14px; 
+  font-weight: 600; 
+  line-height: 1.3; 
+  display: -webkit-box; 
+  -webkit-line-clamp: 2; 
+  -webkit-box-orient: vertical; 
+  overflow: hidden; 
+}
+
+/* --- СПИСОК ТРЕКОВ --- */
+.tracks-list { 
+  padding: 0 16px; 
+}
+
+.track-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #2a2a2a;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+.track-item:hover { 
+  color: var(--accent); 
+}
+.track-item.current { 
+  color: var(--accent); 
+  font-weight: 600; 
+}
+
+.track-num { 
+  width: 30px; 
+  color: var(--text-secondary); 
+  font-size: 13px; 
+}
+
+/* --- ЗАКРЕПЛЕННЫЙ ПЛЕЕР ВНИЗУ --- */
+.sticky-player {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #282828;
+  border-top: 1px solid #333;
+  padding: 12px 16px;
+  z-index: 100;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+}
+
+.player-info { 
+  display: flex; 
+  align-items: center; 
+  gap: 12px; 
+  margin-bottom: 12px; 
+}
+
+.player-cover { 
+  width: 48px; 
+  height: 48px; 
+  border-radius: 4px; 
+  background: #444; 
+  object-fit: cover; 
+}
+
+.player-text { 
+  flex: 1; 
+  overflow: hidden; 
+}
+
+.player-title { 
+  font-size: 14px; 
+  font-weight: 600; 
+  white-space: nowrap; 
+  overflow: hidden; 
+  text-overflow: ellipsis; 
+}
+
+.player-album { 
+  font-size: 12px; 
+  color: var(--text-secondary); 
+}
+
+.player-controls { 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-around; 
+}
+
+.ctrl-btn {
+  background: none; 
+  border: none; 
+  color: var(--text); 
+  font-size: 22px; 
+  cursor: pointer; 
+  padding: 8px;
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
+  transition: transform 0.1s;
+}
+.ctrl-btn:active { 
+  transform: scale(0.9); 
+}
+
+.ctrl-btn.play { 
+  background: var(--text); 
+  color: var(--bg); 
+  border-radius: 50%; 
+  width: 40px; 
+  height: 40px; 
+  font-size: 18px; 
+}
+
+.ctrl-btn.active { 
+  color: var(--accent); 
+}
+
+/* --- СОСТОЯНИЯ ЗАГРУЗКИ И ОШИБОК --- */
+.loading { 
+  text-align: center; 
+  padding: 40px; 
+  color: var(--text-secondary); 
+}
+
+.error { 
+  text-align: center; 
+  padding: 40px; 
+  color: #ff6b6b; 
+}
+/* Контейнер для экрана треков */
+.tracks-view-container {
+  padding-bottom: 20px;
+}
+
+/* Блок с деталями альбома */
+.album-details {
+  padding: 16px;
+  text-align: center;
+  border-bottom: 1px solid #333;
+  margin-bottom: 8px;
+}
+
+.album-details-cover {
+  width: 180px;
+  height: 180px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  object-fit: cover;
+  margin-bottom: 16px;
+}
+
+.album-description {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  text-align: left;
+  white-space: pre-wrap; /* Сохраняет переносы строк из описания Archive.org */
+  word-wrap: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--surface);
+  border-radius: 8px;
+}
+
+/* Улучшение отображения названия трека */
+.track-title-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+
+/* Бейдж "играет" на обложке в общем списке */
+.playing-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Подсветка играющего альбома */
+.album-card.currently-playing {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 12px rgba(29, 185, 84, 0.3);
+}
+
+/* Интерактивность плеера */
+.player-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  transition: opacity 0.2s;
+  cursor: pointer;
+}
+
+.player-info:hover {
+  opacity: 0.8;
+}
+
+.player-info:active {
+  transform: scale(0.98);
+}
