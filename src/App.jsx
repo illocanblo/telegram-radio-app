@@ -73,6 +73,16 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
 
+    // Сброс скролла при смене экрана (albums ↔ tracks)
+    // Универсальный сброс всех возможных скроллов
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const root = document.getElementById('root');
+    if (root) root.scrollTop = 0;
+  }, [view, viewedAlbum?.identifier]);
+
     // Показываем/скрываем нативную кнопку "Назад" Telegram
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
