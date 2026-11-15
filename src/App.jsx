@@ -73,6 +73,33 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
 
+    // Показываем/скрываем нативную кнопку "Назад" Telegram
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg?.BackButton) return;
+
+    if (view === 'tracks') {
+      tg.BackButton.show();
+    } else {
+      tg.BackButton.hide();
+    }
+
+    return () => {
+      // При размонтировании скрываем
+      if (view === 'tracks') tg.BackButton.hide();
+    };
+  }, [view]);
+
+  // Обработчик нажатия на BackButton
+  useEffect(() => {
+    window.__onTelegramBack = () => {
+      setView('albums');
+    };
+    return () => {
+      delete window.__onTelegramBack;
+    };
+  }, []);
+
   const audioRef = useRef(null)
 
   const UPLOADERS = [
@@ -320,11 +347,18 @@ export default function App() {
       )}
 
       {/* Плавающая кнопка назад — ТОЛЬКО на экране треков */}
-      {view === 'tracks' && (
-        <button className="floating-back-btn" onClick={() => setView('albums')}>
-          ← Назад к альбомам
-        </button>
-      )}
+      {view === 'tracks' ? (
+  <>
+    <h1 style={{ fontSize: '16px', fontWeight: '600', marginTop: '4px' }}>
+      {viewedAlbum?.title}
+    </h1>
+  </>
+) : (
+  <>
+    <h1>📻 Nenormalizm Recs</h1>
+    <p>{albums.length} альбомов из архива</p>
+  </>
+)}
 
       {/* Экран списка альбомов */}
       {view === 'albums' && (

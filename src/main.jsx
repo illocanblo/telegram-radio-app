@@ -17,6 +17,13 @@ if (window.Telegram && window.Telegram.WebApp) {
   tg.setHeaderColor(bg);
   tg.setBackgroundColor(bg);
   tg.disableVerticalSwipes();
+    // Настраиваем нативную кнопку "Назад" Telegram
+  tg.BackButton.onClick(() => {
+    // Это событие будет перехвачено в App.jsx через window.__onTelegramBack
+    if (window.__onTelegramBack) {
+      window.__onTelegramBack();
+    }
+  });
 
   // 🔑 Определяем, сколько места занимает шапка Telegram
   function updateHeaderOffset() {
