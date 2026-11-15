@@ -81,7 +81,7 @@ export default function App() {
           setAlbums(data.response.docs)
         }
       } catch (e) {
-        setError('Ошибка загрузки альбомов. Проверьте интернет.')
+        setError('Не удалось связаться с архивом. Проверьте соединение 📡')
       } finally {
         setLoading(false)
       }
@@ -286,7 +286,12 @@ export default function App() {
       {/* Экран списка альбомов */}
       {view === 'albums' && (
         <>
-          {loading && <div className="loading">Загрузка альбомов...</div>}
+{loading && (
+  <div className="loader-container">
+    <div className="loader"></div>
+    <p className="loader-text">Собираем коллекцию из архива...</p>
+  </div>
+)}
           {error && <div className="error">{error}</div>}
           <div className="albums-grid">
             {albums.map(album => {
@@ -370,7 +375,12 @@ export default function App() {
           {/* Список треков */}
           <div className="tracks-list">
             <h3 style={{ marginBottom: '12px', fontSize: '15px', color: 'var(--text-secondary)' }}>Треки</h3>
-            {loading && <div className="loading">Загрузка треков...</div>}
+{loading && (
+  <div className="loader-container">
+    <div className="loader"></div>
+    <p className="loader-text">Готовим треклист и метаданные...</p>
+  </div>
+)}
             {error && <div className="error">{error}</div>}
             
             {!loading && !error && viewedTracks.map((track, index) => (

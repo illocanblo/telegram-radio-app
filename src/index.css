@@ -21,15 +21,19 @@ body {
   padding-bottom: 140px; /* Отступ снизу, чтобы плеер не перекрывал последние треки */
 }
 
+/* Отступ для всего контента под системную шапку Telegram */
+#root > div {
+  padding-top: env(safe-area-inset-top);
+}
+
 /* --- ЛИПКАЯ ШАПКА (Исправление проблемы со скроллом) --- */
 .header {
-  padding: 12px 16px;
-  position: sticky; /* Делает элемент липким */
-  top: 0;           /* Прилипает к самому верху экрана */
-  background: rgba(18, 18, 18, 0.95);
-  backdrop-filter: blur(10px); /* Эффект размытия фона под шапкой */
-  z-index: 10;      /* Гарантирует, что шапка будет поверх треков */
-  border-bottom: 1px solid #333;
+  padding: calc(60px + env(safe-area-inset-top)) 16px 12px; /* Увеличили отступ сверху */
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
 .header h1 { 
