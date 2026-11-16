@@ -11,7 +11,7 @@ import {
   tg, capabilities, setBottomBar, setClosingConfirmation, hideKeyboard,
   hapticNotify, isFullscreen, toggleFullscreen, onFullscreenChange,
   homeScreenStatus, addToHomeScreen, onHomeScreenAdded,
-  shareToStory, downloadFile, openExternal, showSettingsButton,
+  shareToStory, downloadFile, openExternal, showSettingsButton, confirmNative,
   setMainButton, setSecondaryButton, onMainButton, onSecondaryButton,
 } from './telegram.js'
 import * as sync from './sync.js'
@@ -21,7 +21,11 @@ const UPLOADER_EMAILS = ['nenormalizm@gmail.com', 'nenormalizmlab@gmail.com', 's
 const FORMAT_RANK = { 'VBR MP3': 0, MP3: 1, M4A: 2, AAC: 2, 'Ogg Vorbis': 3, Opus: 3, FLAC: 4, Flac: 4, Shorten: 5 }
 const FORMAT_SHORT = { 'VBR MP3': 'MP3', MP3: 'MP3', M4A: 'M4A', AAC: 'AAC', 'Ogg Vorbis': 'OGG', Opus: 'OPUS', FLAC: 'FLAC', Flac: 'FLAC', Shorten: 'SHN' }
 
-const K = { prefs: 'nr.prefs.v1', library: 'nr.library.v1', favs: 'nr.favs.v1', hidden: 'nr.hidden.v1', session: 'nr.session.v1' }
+const K = {
+  prefs: 'nr.prefs.v1', library: 'nr.library.v1', favs: 'nr.favs.v1',
+  hidden: 'nr.hidden.v1', session: 'nr.session.v1', played: 'nr.played.v1',
+}
+const PLAYED_MAX = 600
 
 const cx = (...a) => a.filter(Boolean).join(' ')
 
@@ -53,6 +57,14 @@ function fmtTime(sec) {
   if (!Number.isFinite(sec) || sec < 0) return '0:00'
   const s = Math.floor(sec % 60), m = Math.floor(sec / 60) % 60, h = Math.floor(sec / 3600)
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`
+}
+
+function fmtSize(bytes) {
+  const n = Number(bytes)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  if (n > 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} ГБ`
+  if (n > 1024 * 1024) return `${Math.round(n / 1024 / 1024)} МБ`
+  return `${Math.round(n / 1024)} КБ`
 }
 
 function parseLength(v) {
@@ -122,6 +134,7 @@ function pluralReleases(n) {
 function safeFileName(s) {
   return String(s || 'track').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'track'
 }
+const fileUrl = (id, name) => `https://archive.org/download/${id}/${String(name).split('/').map(encodeURIComponent).join('/')}`
 
 function buildTracks(data, identifier) {
   const files = Array.isArray(data?.files) ? data.files : []
@@ -141,7 +154,7 @@ function buildTracks(data, identifier) {
       name: f.name,
       title: base.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim(),
       ext,
-      url: `https://archive.org/download/${identifier}/${f.name.split('/').map(encodeURIComponent).join('/')}`,
+      url: fileUrl(identifier, f.name),
       duration: parseLength(f.length),
       format: f.format,
       rank,
@@ -149,6 +162,23 @@ function buildTracks(data, identifier) {
     })
   }
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+}
+
+/** Готовый ZIP в самом релизе — предпочтительный источник архива. */
+function findZip(data, identifier) {
+  const files = Array.isArray(data?.files) ? data.files : []
+  const zips = files.filter((f) => f?.name && /\.zip$/i.test(f.name))
+  if (!zips.length) return null
+  zips.sort((a, b) => (Number(b.size) || 0) - (Number(a.size) || 0))
+  const best = zips.find((z) => z.name.toLowerCase().includes(identifier.toLowerCase())) || zips[0]
+  return { name: best.name, url: fileUrl(identifier, best.name), size: Number(best.size) || 0 }
+}
+
+/** Архив на лету: archive.org/compress/<id>/formats=... */
+function compressUrl(identifier, formats) {
+  const list = [...new Set(formats.filter(Boolean))]
+  const base = `https://archive.org/compress/${encodeURIComponent(identifier)}`
+  return list.length ? `${base}/formats=${list.map(encodeURIComponent).join(',')}` : base
 }
 
 const S = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -187,6 +217,7 @@ const ICollapse = (p) => <Ico {...p} d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5" 
 const IHome = (p) => <Ico {...p} d="M4 11l8-7 8 7M6 10v10h12V10M10 20v-6h4v6" />
 const IStory = (p) => <Ico {...p}><rect x="3.5" y="3.5" width="17" height="17" rx="5" {...S} strokeDasharray="4 3" /><path d="M12 8.5v7M8.5 12h7" {...S} /></Ico>
 const IDownload = (p) => <Ico {...p} d="M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 20h14" />
+const IAlbumZip = (p) => <Ico {...p}><path d="M4 7.5 12 4l8 3.5v9L12 20l-8-3.5v-9Z" {...S} /><path d="M12 12v8M4 7.5l8 4.5 8-4.5" {...S} /></Ico>
 const ICloud = (p) => <Ico {...p} d="M7 18h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 11A3.5 3.5 0 0 0 7 18Z" />
 
 function Cover({ src, alt, className, seed, style }) {
@@ -239,10 +270,12 @@ export default function App() {
   const [libError, setLibError] = useState('')
   const [favs, setFavs] = useState(() => new Set(readLS(K.favs, [])))
   const [hidden, setHidden] = useState(() => new Set(readLS(K.hidden, [])))
+  const [played, setPlayed] = useState(() => new Set(readLS(K.played, [])))
   const [radioRequested, setRadioRequested] = useState(false)
   const [cloudReady, setCloudReady] = useState(!sync.enabled)
   const [fullscreen, setFullscreen] = useState(() => isFullscreen())
   const [homeStatus, setHomeStatus] = useState('unknown')
+  const [dlKey, setDlKey] = useState(null)
 
   const [route, setRoute] = useState(() => readRoute())
   const [viewAlbum, setViewAlbum] = useState(null)
@@ -265,7 +298,6 @@ export default function App() {
   const [resume, setResume] = useState(null)
   const [toasts, setToasts] = useState([])
   const [dragOver, setDragOver] = useState(null)
-  const [downloading, setDownloading] = useState(false)
 
   const audioRef = useRef(null)
   const playerRef = useRef(null)
@@ -323,30 +355,24 @@ export default function App() {
         sync.markPulled('prefs', pulled.prefs.ts)
       }
       if (Array.isArray(pulled.favs?.d)) {
-        setFavs(new Set(pulled.favs.d))
-        writeLS(K.favs, pulled.favs.d)
-        sync.markPulled('favs', pulled.favs.ts)
+        setFavs(new Set(pulled.favs.d)); writeLS(K.favs, pulled.favs.d); sync.markPulled('favs', pulled.favs.ts)
       }
       if (Array.isArray(pulled.hidden?.d)) {
-        setHidden(new Set(pulled.hidden.d))
-        writeLS(K.hidden, pulled.hidden.d)
-        sync.markPulled('hidden', pulled.hidden.ts)
+        setHidden(new Set(pulled.hidden.d)); writeLS(K.hidden, pulled.hidden.d); sync.markPulled('hidden', pulled.hidden.ts)
       }
-      if (pulled.session?.d) {
-        writeLS(K.session, pulled.session.d)
-        sync.markPulled('session', pulled.session.ts)
-      }
+      if (pulled.session?.d) { writeLS(K.session, pulled.session.d); sync.markPulled('session', pulled.session.ts) }
       hydrating.current = false
       setCloudReady(true)
       if (Object.keys(pulled).length) toast('Настройки и избранное загружены из Telegram', 'success')
     })()
     const flush = () => { sync.flush() }
+    const onVis = () => { if (document.visibilityState === 'hidden') flush() }
     window.addEventListener('pagehide', flush)
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
-    return () => { alive = false; window.removeEventListener('pagehide', flush) }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { alive = false; window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', onVis) }
   }, [toast])
 
-  /* ---------- оформление и нативные кнопки ---------- */
+  /* ---------- размеры плеера ---------- */
   useEffect(() => {
     const rs = document.documentElement.style
     const el = playerRef.current
@@ -391,8 +417,7 @@ export default function App() {
 
   useEffect(() => {
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
-    const bar = showPlayer ? (theme === 'light' ? '#eaedf5' : '#0a0c12') : bg
-    setBottomBar(bar)
+    setBottomBar(showPlayer ? (theme === 'light' ? '#eaedf5' : '#0a0c12') : bg)
   }, [showPlayer, theme])
 
   useEffect(() => { setClosingConfirmation(isPlaying) }, [isPlaying])
@@ -409,10 +434,9 @@ export default function App() {
     if (!hydrating.current) sync.push('hidden', list)
   }, [hidden])
 
-  useEffect(() => {
-    const off = onFullscreenChange(() => setFullscreen(isFullscreen()))
-    return off
-  }, [])
+  useEffect(() => { writeLS(K.played, [...played].slice(-PLAYED_MAX)) }, [played])
+
+  useEffect(() => onFullscreenChange(() => setFullscreen(isFullscreen())), [])
 
   useEffect(() => {
     if (!caps.homeScreen) return
@@ -430,7 +454,12 @@ export default function App() {
   useEffect(() => {
     const visible = view === 'album' && !!viewAlbum && !showPlayer && !albumLoading
     setMainButton({ text: 'Слушать релиз', visible })
-    setSecondaryButton({ text: 'Вперемешку', visible: visible && caps.secondary, color: theme === 'light' ? '#eceff7' : '#1b2030', textColor: theme === 'light' ? '#0c1020' : '#eef1f8' })
+    setSecondaryButton({
+      text: 'Вперемешку',
+      visible: visible && caps.secondary,
+      color: theme === 'light' ? '#eceff7' : '#1b2030',
+      textColor: theme === 'light' ? '#0c1020' : '#eef1f8',
+    })
   }, [view, viewAlbum, showPlayer, albumLoading, caps.secondary, theme])
 
   useEffect(() => {
@@ -469,6 +498,8 @@ export default function App() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     const md = data?.metadata || {}
+    const tracks = buildTracks(data, id)
+    const zip = findZip(data, id)
     const built = {
       identifier: id,
       title: asText(md.title) || id,
@@ -477,7 +508,11 @@ export default function App() {
       cover: `https://archive.org/services/img/${id}`,
       description: cleanDescription(md.description),
       subjects: asArray(md.subject).map(String).slice(0, 8),
-      tracks: buildTracks(data, id),
+      tracks,
+      zip,
+      archiveUrl: zip?.url || compressUrl(id, tracks.map((t) => t.format)),
+      archiveSize: zip?.size || 0,
+      archiveReady: !!zip,
     }
     metaCache.current.set(id, built)
     return built
@@ -602,6 +637,13 @@ export default function App() {
   const resetFilters = useCallback(() => { setFavOnly(false); setEra('all'); setQuery(''); analytics.event('filter') }, [])
   const filtersActive = favOnly || era !== 'all' || query.trim() !== ''
 
+  const albumUnlocked = useMemo(() => {
+    if (!viewAlbum) return false
+    const prefix = `${viewAlbum.identifier}/`
+    for (const k of played) if (k.startsWith(prefix)) return true
+    return false
+  }, [played, viewAlbum])
+
   const onSearch = useCallback((v) => {
     setQuery(v)
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -621,6 +663,12 @@ export default function App() {
     countedPlay.current = current.key
     const idx = baseTracks.findIndex((t) => t.key === current.key)
     analytics.play(playerAlbum.identifier, idx >= 0 ? idx : 0, FORMAT_SHORT[current.format] || 'OTHER')
+    setPlayed((p) => {
+      if (p.has(current.key)) return p
+      const n = new Set(p)
+      n.add(current.key)
+      return new Set([...n].slice(-PLAYED_MAX))
+    })
   }, [current, playerAlbum, baseTracks])
 
   const startAlbum = useCallback((album, tracks, startKey = null, forceShuffle = null) => {
@@ -809,10 +857,8 @@ export default function App() {
 
   const shareAlbum = useCallback(async (album) => {
     if (!album) return
-    const link = albumLink(album)
-    const ok = await copyText(link)
-    if (ok) toast('Ссылка на релиз скопирована', 'success')
-    else toast('Не удалось скопировать ссылку', 'error')
+    const ok = await copyText(albumLink(album))
+    toast(ok ? 'Ссылка на релиз скопирована' : 'Не удалось скопировать ссылку', ok ? 'success' : 'error')
   }, [albumLink, toast])
 
   const shareStory = useCallback((album) => {
@@ -825,16 +871,44 @@ export default function App() {
     if (!ok) toast('Истории недоступны в этом клиенте Telegram', 'warn')
   }, [albumLink, toast])
 
-  const downloadTrack = useCallback(async (album) => {
-    const t = (current && playerAlbum?.identifier === album?.identifier) ? current : album?.tracks?.[0]
-    if (!t) { toast('Нет трека для загрузки', 'warn'); return }
-    setDownloading(true)
-    const res = await downloadFile(t.url, `${safeFileName(t.title)}${t.ext || '.mp3'}`)
-    setDownloading(false)
-    if (res.ok) { toast('Трек отправлен в загрузки Telegram', 'success'); hapticNotify('success') }
-    else if (res.reason === 'cancelled') toast('Загрузка отменена', 'info')
-    else toast('Загрузка недоступна в этом клиенте', 'warn')
-  }, [current, playerAlbum, toast])
+  /* ---------- загрузка: только прослушанное ---------- */
+  const downloadTrack = useCallback(async (track) => {
+    if (!track || !played.has(track.key)) return
+    setDlKey(track.key)
+    const name = `${safeFileName(track.title)}${track.ext || '.mp3'}`
+    if (caps.download) {
+      const res = await downloadFile(track.url, name)
+      setDlKey(null)
+      if (res.ok) { toast('Трек отправлен в загрузки Telegram', 'success'); hapticNotify('success') }
+      else if (res.reason === 'cancelled') toast('Загрузка отменена', 'info')
+      else toast('Не удалось скачать трек', 'error', { label: 'Открыть файл', run: () => openExternal(track.url) })
+    } else {
+      setDlKey(null)
+      openExternal(track.url)
+    }
+  }, [played, caps.download, toast])
+
+  const downloadAlbum = useCallback(async (album) => {
+    if (!album || !albumUnlocked) return
+    const size = album.archiveSize ? ` (${fmtSize(album.archiveSize)})` : ''
+    const note = album.archiveReady
+      ? `Скачать релиз целиком одним ZIP${size}?`
+      : `Скачать релиз целиком? Архив собирается на archive.org из аудиофайлов${size}, это может занять время.`
+    const ok = await confirmNative(note)
+    if (!ok) return
+    setDlKey(`album:${album.identifier}`)
+    const name = `${safeFileName(`${catalogOf(album)} ${stripCatalog(album.title)}`)}.zip`
+    if (caps.download) {
+      const res = await downloadFile(album.archiveUrl, name)
+      setDlKey(null)
+      if (res.ok) { toast('Архив релиза отправлен в загрузки Telegram', 'success'); hapticNotify('success') }
+      else if (res.reason === 'cancelled') toast('Загрузка отменена', 'info')
+      else toast('Не удалось скачать архив', 'error', { label: 'Открыть на archive.org', run: () => openExternal(album.archiveUrl) })
+    } else {
+      setDlKey(null)
+      openExternal(album.archiveUrl)
+    }
+  }, [albumUnlocked, caps.download, toast])
 
   const addHome = useCallback(async () => {
     if (!addToHomeScreen()) { toast('Добавление на экран недоступно', 'warn'); return }
@@ -902,9 +976,10 @@ export default function App() {
   }
 
   useEffect(() => {
+    const pack = () => ({ albumId: playerAlbum.identifier, trackKey: current.key, time: audioRef.current?.currentTime || 0, shuffle, repeat, ts: Date.now() })
     const save = () => {
       if (!current || !playerAlbum) return
-      const payload = { albumId: playerAlbum.identifier, trackKey: current.key, time: audioRef.current?.currentTime || 0, shuffle, repeat, ts: Date.now() }
+      const payload = pack()
       writeLS(K.session, payload)
       if (!hydrating.current && Date.now() - lastSessionPush.current > 25000) {
         lastSessionPush.current = Date.now()
@@ -913,7 +988,7 @@ export default function App() {
     }
     const final = () => {
       if (!current || !playerAlbum) return
-      const payload = { albumId: playerAlbum.identifier, trackKey: current.key, time: audioRef.current?.currentTime || 0, shuffle, repeat, ts: Date.now() }
+      const payload = pack()
       writeLS(K.session, payload)
       if (!hydrating.current) sync.push('session', payload, { delay: 0 })
       sync.flush()
@@ -991,6 +1066,7 @@ export default function App() {
   const shownTime = scrub != null ? scrub : currentTime
   const totalView = viewTracks.reduce((s, t) => s + (t.duration || 0), 0)
   const seekPct = duration ? Math.min(100, (shownTime / duration) * 100) : 0
+  const playedInView = viewTracks.filter((t) => played.has(t.key)).length
 
   return (
     <>
@@ -1171,7 +1247,7 @@ export default function App() {
                   </button>
                 )}
                 {caps.fullscreen && (
-                  <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: caps.homeScreen && homeStatus !== 'added' ? 0 : 'auto' }} onClick={() => { toggleFullscreen(); setFullscreen(isFullscreen()) }}>
+                  <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => { toggleFullscreen(); setFullscreen(isFullscreen()) }}>
                     {fullscreen ? <><ICollapse size={14} /> Обычный режим</> : <><IExpand size={14} /> Полный экран</>}
                   </button>
                 )}
@@ -1259,12 +1335,16 @@ export default function App() {
                         <button className="btn btn-primary" onClick={() => startAlbum(viewAlbum, viewTracks, null, false)}><IPlay size={15} /> Слушать релиз</button>
                         <button className="btn btn-ghost" onClick={() => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) }}><IShuffle size={15} /> Вперемешку</button>
                         {caps.story && <button className="btn btn-ghost" onClick={() => shareStory(viewAlbum)}><IStory size={15} /> В историю</button>}
-                        {caps.download && (
-                          <button className="btn btn-ghost" onClick={() => downloadTrack(viewAlbum)} disabled={downloading}>
-                            <IDownload size={15} /> {downloading ? 'Готовим…' : 'Скачать трек'}
+                        {albumUnlocked && (
+                          <button className="btn btn-ghost" onClick={() => downloadAlbum(viewAlbum)} disabled={dlKey === `album:${viewAlbum.identifier}`}>
+                            <IAlbumZip size={15} />
+                            {dlKey === `album:${viewAlbum.identifier}` ? 'Готовим архив…' : `Скачать релиз ZIP${viewAlbum.archiveSize ? ` · ${fmtSize(viewAlbum.archiveSize)}` : ''}`}
                           </button>
                         )}
                       </div>
+                      {!albumUnlocked && (
+                        <div className="hero-hint">Загрузка откроется после прослушивания: отдельный трек — после его воспроизведения, весь релиз — после любого трека из него.</div>
+                      )}
                       {viewAlbum.description && (
                         <div className="desc">
                           {viewAlbum.description.length > 320 && !descOpen ? viewAlbum.description.slice(0, 320).trimEnd() + '…' : viewAlbum.description}
@@ -1287,17 +1367,41 @@ export default function App() {
                   )}
 
                   <div className="tracks">
-                    <div className="tracks-head"><h3>Треклист</h3><span className="sum">{viewTracks.length} · {fmtTime(totalView)}</span></div>
+                    <div className="tracks-head">
+                      <h3>Треклист</h3>
+                      <span className="sum">{viewTracks.length} · {fmtTime(totalView)}{playedInView ? ` · прослушано ${playedInView}` : ''}</span>
+                    </div>
                     <div role="list">
                       {viewTracks.map((t, i) => {
                         const isCur = current?.key === t.key
+                        const canDl = played.has(t.key)
                         return (
-                          <button key={t.key} role="listitem" className="track" aria-current={isCur ? 'true' : undefined} onClick={() => playFromView(t)} title={t.title}>
+                          <div
+                            key={t.key}
+                            role="listitem button"
+                            tabIndex={0}
+                            className="track"
+                            aria-current={isCur ? 'true' : undefined}
+                            onClick={() => playFromView(t)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); playFromView(t) } }}
+                            title={t.title}
+                          >
                             <span className="t-num">{isCur ? <Eq paused={!isPlaying} /> : String(i + 1).padStart(2, '0')}</span>
                             <span className="t-title">{t.title}</span>
                             <span className="t-fmt">{FORMAT_SHORT[t.format] || t.format}</span>
                             <span className="t-time">{t.duration ? fmtTime(t.duration) : '—'}</span>
-                          </button>
+                            {canDl ? (
+                              <button
+                                className="t-dl"
+                                onClick={(e) => { e.stopPropagation(); downloadTrack(t) }}
+                                disabled={dlKey === t.key}
+                                aria-label={`Скачать ${t.title}`}
+                                title="Скачать трек"
+                              >
+                                {dlKey === t.key ? <span className="spinner" style={{ width: 13, height: 13 }} /> : <IDownload size={15} />}
+                              </button>
+                            ) : <span className="t-slot" aria-hidden="true" />}
+                          </div>
                         )
                       })}
                     </div>
@@ -1305,11 +1409,7 @@ export default function App() {
 
                   <div className="album-foot">
                     <IDisc size={14} /><span>Источник:</span>
-                    <button
-                      className="btn btn-quiet"
-                      style={{ height: 30, padding: '0 8px', fontSize: 12 }}
-                      onClick={() => openExternal(`https://archive.org/details/${encodeURIComponent(viewAlbum.identifier)}`, true)}
-                    >
+                    <button className="btn btn-quiet" style={{ height: 30, padding: '0 8px', fontSize: 12 }} onClick={() => openExternal(`https://archive.org/details/${encodeURIComponent(viewAlbum.identifier)}`, true)}>
                       archive.org/details/{viewAlbum.identifier}
                     </button>
                   </div>
