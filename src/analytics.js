@@ -11,13 +11,14 @@
  *  - не сохраняется текст поисковых запросов;
  *  - идентификатор сессии живёт только в памяти вкладки и не передаётся.
  *
- * Отправка включается на сервере переменной TELEMETRY=1 и определяется
- * в рантайме через /api/config — пересборка клиента не требуется.
- * Do Not Track и Global Privacy Control отключают отправку.
+ * Сбор включается на сервере (TELEMETRY=1) и определяется в рантайме через
+ * /api/config. Do Not Track и Global Privacy Control по умолчанию блокируют
+ * отправку; владелец может разрешить её для своего устройства на время сессии.
  */
 
 const VERSION = 1
 const LOCAL_KEY = 'nr.stats.v1'
+const OVERRIDE_KEY = 'nr.stats.override'
 const ENDPOINT = '/api/stats'
 const CONFIG_ENDPOINT = '/api/config'
 const FLUSH_MS = 60000
@@ -44,6 +45,10 @@ function privacyBlocked() {
   if (typeof navigator === 'undefined') return false
   const dnt = navigator.doNotTrack || window.doNotTrack
   return dnt === '1' || dnt === 'yes' || navigator.globalPrivacyControl === true
+}
+
+function readOverride() {
+  try { return sessionStorage.getItem(OVERRIDE_KEY) === '1' } catch { return false }
 }
 
 function platformClass() {
@@ -118,12 +123,13 @@ let sessionCounted = false
 let ctx = { plat: platformClass(), theme: 'dark' }
 let flushTimer = null
 let started = false
+let override = readOverride()
 let cfg = { telemetry: FORCED, storage: false, summary: false, checked: false, reachable: false }
 
 const listeners = new Set()
 function notify() { listeners.forEach((fn) => { try { fn() } catch {} }) }
 
-function transmitting() { return (cfg.telemetry || FORCED) && !privacyBlocked() }
+function transmitting() { return (cfg.telemetry || FORCED) && (!privacyBlocked() || override) }
 
 function day() {
   const d = today()
@@ -197,9 +203,22 @@ export const analytics = {
     return {
       transmitting: transmitting(),
       privacyBlocked: privacyBlocked(),
+      override,
       platform: ctx.plat,
+      pending: Object.keys(delta.ev).length + delta.sessions + Math.round(delta.listenSec),
       ...cfg,
     }
+  },
+
+  setOverride(v) {
+    override = !!v
+    try {
+      if (override) sessionStorage.setItem(OVERRIDE_KEY, '1')
+      else sessionStorage.removeItem(OVERRIDE_KEY)
+    } catch {}
+    notify()
+    if (override) flush()
+    return override
   },
 
   setTheme(theme) { ctx.theme = theme === 'light' ? 'light' : 'dark' },
@@ -271,16 +290,33 @@ export const analytics = {
 
   flush,
 
+  async flushNow() {
+    if (!transmitting()) {
+      return { ok: false, message: privacyBlocked() && !override ? 'Отправку блокирует Do Not Track. Разрешите её для этого устройства ниже.' : 'Сбор выключен на сервере: задайте TELEMETRY=1.' }
+    }
+    const body = payload()
+    if (!body) return { ok: true, empty: true, message: 'Новых событий нет — отправлять нечего. Послушайте трек и повторите.' }
+    delta = blankDelta()
+    try {
+      const r = await fetch(ENDPOINT, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), credentials: 'omit', mode: 'same-origin', cache: 'no-store',
+      })
+      if (r.status === 204) return { ok: true, message: 'События отправлены и записаны. Откройте «Аудитория» → Обновить.' }
+      if (r.status === 503) return { ok: false, message: 'Хранилище не настроено: UPSTASH_REDIS_REST_URL / TOKEN.' }
+      if (r.status === 403) return { ok: false, message: 'Сбор выключен на сервере (TELEMETRY).' }
+      return { ok: false, message: `Приёмник ответил ${r.status}.` }
+    } catch {
+      return { ok: false, message: 'Нет связи с /api/stats.' }
+    }
+  },
+
   async testSend() {
     const body = { v: VERSION, day: today(), nonce: nonce(), sessions: 0, listenSec: 0, ev: {}, albums: {}, tracks: {}, plat: {}, theme: {}, fmt: {} }
     try {
       const r = await fetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        credentials: 'omit',
-        mode: 'same-origin',
-        cache: 'no-store',
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), credentials: 'omit', mode: 'same-origin', cache: 'no-store',
       })
       if (r.status === 204) return { ok: true, status: 204, message: 'Приёмник отвечает, хранилище настроено. Проверка не записала данных.' }
       if (r.status === 503) return { ok: false, status: 503, message: 'Хранилище не настроено: задайте UPSTASH_REDIS_REST_URL и UPSTASH_REDIS_REST_TOKEN.' }
@@ -306,10 +342,10 @@ function payload() {
 }
 
 function flush() {
-  if (!transmitting()) { delta = blankDelta(); return }
+  if (!transmitting()) return
   const body = payload()
-  delta = blankDelta()
   if (!body) return
+  delta = blankDelta()
   try {
     const json = JSON.stringify(body)
     if (navigator.sendBeacon) {
@@ -318,6 +354,7 @@ function flush() {
       fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json, keepalive: true, credentials: 'omit', mode: 'same-origin' }).catch(() => {})
     }
   } catch {}
+  notify()
 }
 
 function onPageHide() { flush() }

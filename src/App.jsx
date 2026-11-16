@@ -495,6 +495,14 @@ export default function App() {
     if (a && a.readyState >= 2) a.play().catch(() => {})
   }, [])
 
+  const registerPlay = useCallback(() => {
+    if (!current || !playerAlbum) return
+    if (countedPlay.current === current.key) return
+    countedPlay.current = current.key
+    const idx = baseTracks.findIndex((t) => t.key === current.key)
+    analytics.play(playerAlbum.identifier, idx >= 0 ? idx : 0, FORMAT_SHORT[current.format] || 'OTHER')
+  }, [current, playerAlbum, baseTracks])
+
   const startAlbum = useCallback((album, tracks, startKey = null, forceShuffle = null) => {
     if (!tracks?.length) return
     const useShuffle = forceShuffle === null ? shuffle : forceShuffle
@@ -743,13 +751,17 @@ export default function App() {
       const order = s.shuffle ? shuffleArr(built.tracks) : built.tracks
       const idx = order.findIndex((t) => t.key === s.trackKey)
       const finalOrder = idx > 0 ? [order[idx], ...order.filter((_, i) => i !== idx)] : order
+      const dur = finalOrder[0]?.duration || 0
+      const saved = Number(s.time) || 0
+      const nearEnd = dur > 0 && saved >= dur - 5
+      const startTime = nearEnd ? 0 : saved
       setPlayerAlbum(built); setBaseTracks(built.tracks); setQueue(finalOrder); setQIndex(0)
       if (typeof s.shuffle === 'boolean') setShuffle(s.shuffle)
       if (s.repeat) setRepeat(s.repeat)
-      pendingSeek.current = s.time || 0
-      setCurrentTime(s.time || 0)
-      setDuration(finalOrder[0]?.duration || 0)
-      setResume({ time: s.time || 0 })
+      pendingSeek.current = startTime
+      setCurrentTime(startTime)
+      setDuration(dur)
+      if (startTime > 5) setResume({ time: startTime })
     }).catch(() => {})
   }, [fetchAlbum])
 
@@ -806,14 +818,8 @@ export default function App() {
           ref={audioRef}
           src={current?.url}
           preload="metadata"
-          onPlay={() => {
-            setIsPlaying(true); setBuffering(false); setResume(null)
-            if (current && playerAlbum && countedPlay.current !== current.key) {
-              countedPlay.current = current.key
-              const idx = baseTracks.findIndex((t) => t.key === current.key)
-              analytics.play(playerAlbum.identifier, idx >= 0 ? idx : 0, FORMAT_SHORT[current.format] || 'OTHER')
-            }
-          }}
+          onPlay={() => { setIsPlaying(true); setBuffering(false); setResume(null); registerPlay() }}
+          onPlaying={() => { setBuffering(false); registerPlay() }}
           onPause={() => setIsPlaying(false)}
           onEnded={() => {
             if (current && playerAlbum) {
@@ -831,7 +837,6 @@ export default function App() {
           }}
           onProgress={onProgress}
           onWaiting={() => setBuffering(true)}
-          onPlaying={() => setBuffering(false)}
           onError={onAudioError}
         />
 

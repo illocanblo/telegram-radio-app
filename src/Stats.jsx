@@ -15,6 +15,8 @@ const CSS = `
 .st-pill.warn i{background:var(--warning);box-shadow:0 0 8px var(--warning)}
 .st-note{font-size:12.5px;color:var(--muted);line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-m);padding:12px 14px;margin-bottom:14px}
 .st-note b{color:var(--text)}
+.st-note.warn{border-color:rgba(255,180,61,.35);background:rgba(255,180,61,.08)}
+.st-note.warn b{color:var(--warning)}
 .st-probe{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .st-probe .res{font-size:12.5px;color:var(--muted);flex:1;min-width:180px}
 .st-probe .res.ok{color:var(--success)}
@@ -26,8 +28,10 @@ const CSS = `
 .st-kpi b{display:block;font-size:26px;font-weight:800;letter-spacing:-.03em;margin-top:6px;line-height:1}
 .st-kpi i{font-style:normal;font-size:11.5px;color:var(--muted);display:block;margin-top:5px}
 .st-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-l);padding:16px;margin-bottom:14px}
-.st-card h3{font-size:12px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.st-card h3{font-size:12px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .st-card h3 em{font-style:normal;margin-left:auto;color:var(--muted);letter-spacing:0;text-transform:none;font-family:var(--font);font-size:12px}
+.st-card p{font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:12px}
+.st-card p b{color:var(--text)}
 .st-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
 .st-bars{display:flex;align-items:flex-end;gap:3px;height:132px}
 .st-bar{flex:1;min-width:4px;display:flex;flex-direction:column;justify-content:flex-end;height:100%;position:relative}
@@ -53,7 +57,7 @@ const CSS = `
 .st-key input:focus{border-color:var(--acid);box-shadow:0 0 0 3px rgba(198,255,61,.16)}
 .st-empty{padding:26px 8px;text-align:center;color:var(--dim);font-size:13px}
 .st-err{color:var(--danger);font-size:12.5px;margin-top:10px}
-.st-actions{display:flex;gap:8px;flex-wrap:wrap}
+.st-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 @media (max-width:640px){
   .st-head h1{font-size:19px}
   .st-kpi b{font-size:22px}
@@ -77,11 +81,7 @@ const nfmt = (n) => new Intl.NumberFormat('ru-RU').format(Math.round(n || 0))
 const minutes = (sec) => Math.round((sec || 0) / 60)
 
 function Kpi({ label, value, hint, color }) {
-  return (
-    <div className="st-kpi" style={{ '--k': color }}>
-      <span>{label}</span><b>{value}</b>{hint && <i>{hint}</i>}
-    </div>
-  )
+  return <div className="st-kpi" style={{ '--k': color }}><span>{label}</span><b>{value}</b>{hint && <i>{hint}</i>}</div>
 }
 
 function Pill({ state, children }) {
@@ -165,9 +165,13 @@ export default function Stats({ albums = [], onBack }) {
   const [undo, setUndo] = useState(null)
   const [probe, setProbe] = useState(null)
   const [probing, setProbing] = useState(false)
+  const [sent, setSent] = useState(null)
+  const [sending, setSending] = useState(false)
 
-  useEffect(() => analytics.subscribe(() => { setTick((t) => t + 1); setStatus(analytics.status()) }), [])
-  useEffect(() => { analytics.probe().then(() => setStatus(analytics.status())) }, [])
+  const sync = useCallback(() => { setTick((t) => t + 1); setStatus(analytics.status()) }, [])
+
+  useEffect(() => analytics.subscribe(sync), [sync])
+  useEffect(() => { analytics.probe().then(sync) }, [sync])
 
   const local = useMemo(() => summaryOf(analytics.getLocal()), [tick])
 
@@ -191,7 +195,7 @@ export default function Stats({ albums = [], onBack }) {
   }, [albumIndex])
 
   const load = useCallback(async (days = range) => {
-    if (!key.trim()) { setErr('Введите ключ доступа'); return }
+    if (!key.trim()) { setErr('Введите ключ STATS_KEY из настроек Vercel'); return }
     setBusy(true); setErr('')
     try {
       const r = await fetch(`/api/summary?days=${days}`, { headers: { 'x-stats-key': key.trim() }, credentials: 'omit', cache: 'no-store' })
@@ -199,20 +203,36 @@ export default function Stats({ albums = [], onBack }) {
       if (r.status === 503) throw new Error('Хранилище или STATS_KEY не настроены на сервере')
       if (!r.ok) throw new Error(`Сервер ответил ${r.status}`)
       setRemote(await r.json())
-      setSource('audience')
       try { sessionStorage.setItem('nr.stats.key', key.trim()) } catch {}
     } catch (e) {
       setErr(e?.message || 'Не удалось получить сводку')
     } finally { setBusy(false) }
   }, [key, range])
 
+  const openAudience = useCallback(() => {
+    setSource('audience')
+    setErr('')
+    if (!remote && key.trim()) load()
+  }, [remote, key, load])
+
+  const forgetKey = useCallback(() => {
+    setRemote(null); setKey(''); setErr('')
+    try { sessionStorage.removeItem('nr.stats.key') } catch {}
+  }, [])
+
   const runProbe = useCallback(async () => {
     setProbing(true)
-    const r = await analytics.testSend()
-    setProbe(r)
+    setProbe(await analytics.testSend())
     setProbing(false)
-    analytics.probe().then(() => setStatus(analytics.status()))
-  }, [])
+    analytics.probe().then(sync)
+  }, [sync])
+
+  const sendNow = useCallback(async () => {
+    setSending(true)
+    setSent(await analytics.flushNow())
+    setSending(false)
+    sync()
+  }, [sync])
 
   const data = source === 'audience' && remote ? remote : local
   const totals = data.totals || {}
@@ -224,6 +244,7 @@ export default function Stats({ albums = [], onBack }) {
   const completes = totals.complete || 0
   const rate = starts ? Math.round((completes / starts) * 100) : 0
   const avg = starts ? Math.round((totals.listenSec || 0) / starts) : 0
+  const audienceEmpty = source === 'audience' && remote && !starts && !totals.sessions
 
   const exportJson = () => {
     const payload = source === 'audience' && remote ? { scope: 'audience', ...remote } : { scope: 'device', ...analytics.getLocal() }
@@ -244,7 +265,7 @@ export default function Stats({ albums = [], onBack }) {
         <h1>Статистика</h1>
         <div className="st-src">
           <button className="chip" aria-pressed={source === 'device'} onClick={() => setSource('device')}>Это устройство</button>
-          <button className="chip" aria-pressed={source === 'audience'} onClick={() => (remote ? setSource('audience') : load())} disabled={busy}>Аудитория</button>
+          <button className="chip" aria-pressed={source === 'audience'} onClick={openAudience} disabled={busy}>Аудитория</button>
         </div>
       </div>
 
@@ -255,23 +276,45 @@ export default function Stats({ albums = [], onBack }) {
         <Pill state={status.storage ? 'ok' : 'bad'}>хранилище {status.storage ? 'готово' : 'не настроено'}</Pill>
         <Pill state={status.summary ? 'ok' : 'bad'}>ключ сводки {status.summary ? 'задан' : 'не задан'}</Pill>
         <Pill state={status.transmitting ? 'ok' : 'warn'}>
-          отправка {status.privacyBlocked ? 'заблокирована DNT' : status.transmitting ? 'активна' : 'не идёт'}
+          отправка {status.transmitting ? (status.override && status.privacyBlocked ? 'разрешена вручную' : 'активна') : status.privacyBlocked ? 'заблокирована DNT' : 'не идёт'}
         </Pill>
         <Pill state="ok">платформа {PLAT_RU[status.platform] || status.platform}</Pill>
+        <Pill state={status.pending ? 'warn' : 'ok'}>в очереди {status.pending}</Pill>
       </div>
 
       <div className="st-probe">
         <button className="btn btn-ghost" onClick={runProbe} disabled={probing}>{probing ? 'Проверяем…' : 'Проверить приёмник'}</button>
-        <span className={`res ${probe ? (probe.ok ? 'ok' : 'bad') : ''}`}>
-          {probe ? probe.message : 'Проверка отправляет пустой пакет и не записывает данных.'}
+        <button className="btn btn-ghost" onClick={sendNow} disabled={sending}>{sending ? 'Отправляем…' : 'Отправить сейчас'}</button>
+        <span className={`res ${sent ? (sent.ok ? 'ok' : 'bad') : probe ? (probe.ok ? 'ok' : 'bad') : ''}`}>
+          {sent ? sent.message : probe ? probe.message : 'Проверка отправляет пустой пакет и не записывает данных.'}
         </span>
       </div>
+
+      {status.privacyBlocked && (
+        <div className="st-card">
+          <h3>Do Not Track</h3>
+          <p>
+            Этот браузер передаёт сигнал <b>Do Not Track</b>, поэтому приложение по умолчанию
+            ничего не отправляет — ни по вам, ни по другим слушателям с таким же сигналом.
+            Локальные счётчики при этом продолжают работать. Разрешение ниже действует
+            <b> только на этом устройстве и только до конца сессии</b>, на остальных слушателей оно не влияет.
+          </p>
+          <div className="st-actions">
+            <button
+              className={status.override ? 'btn btn-ghost' : 'btn btn-primary'}
+              onClick={() => { analytics.setOverride(!status.override); setSent(null); sync() }}
+            >
+              {status.override ? 'Запретить снова' : 'Разрешить для этого устройства'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="st-note">
         {source === 'device' ? (
           <>
             <b>Локальные данные.</b> Счётчики хранятся только в этом браузере. Идентификаторы пользователей,
-            IP, cookies и текст поисковых запросов не собираются. Агрегаты по всей аудитории видны на вкладке
+            IP, cookies и текст поисковых запросов не собираются. Агрегаты по всей аудитории — на вкладке
             «Аудитория» после ввода ключа.
           </>
         ) : (
@@ -285,6 +328,7 @@ export default function Stats({ albums = [], onBack }) {
       {source === 'audience' && !remote && (
         <div className="st-card">
           <h3>Доступ к сводке</h3>
+          <p>Введите значение переменной <b>STATS_KEY</b> из Vercel → Settings → Environments → Production.</p>
           <div className="st-key">
             <input
               type="password"
@@ -302,6 +346,14 @@ export default function Stats({ albums = [], onBack }) {
             <button className="btn btn-primary" onClick={() => load()} disabled={busy}>{busy ? 'Загрузка…' : 'Открыть'}</button>
           </div>
           {err && <div className="st-err">{err}</div>}
+        </div>
+      )}
+
+      {audienceEmpty && (
+        <div className="st-note warn">
+          <b>В хранилище пока пусто.</b> События уходят раз в минуту и при закрытии вкладки.
+          Послушайте трек, нажмите «Отправить сейчас», затем «Обновить». Если у слушателей включён
+          Do Not Track, их события не отправляются — это ожидаемо.
         </div>
       )}
 
@@ -354,7 +406,8 @@ export default function Stats({ albums = [], onBack }) {
             <h3>Действия</h3>
             <div className="st-actions">
               <button className="btn btn-ghost" onClick={exportJson}>Скачать JSON</button>
-              {source === 'audience' && <button className="btn btn-ghost" onClick={() => load(range)} disabled={busy}>Обновить</button>}
+              {source === 'audience' && remote && <button className="btn btn-ghost" onClick={() => load(range)} disabled={busy}>Обновить</button>}
+              {source === 'audience' && remote && <button className="btn btn-quiet" onClick={forgetKey}>Сменить ключ</button>}
               {source === 'device' && <button className="btn btn-ghost" onClick={resetLocal}>Сбросить локальные данные</button>}
               {undo && <button className="btn btn-primary" onClick={() => { analytics.restore(undo); setUndo(null) }}>Отменить сброс</button>}
             </div>
