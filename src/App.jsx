@@ -26,14 +26,56 @@ const K = {
   hidden: 'nr.hidden.v1', session: 'nr.session.v1', played: 'nr.played.v1',
 }
 const PLAYED_MAX = 600
+const META_TTL = 6 * 60 * 60 * 1000
+const META_MAX = 40
+const META_IDX = 'nr.meta.idx'
+const META_VER = 1
+const FETCH_TIMEOUT = 12000
+const PREFETCH_CONCURRENCY = 2
+const PREFETCH_AUTO_MAX = 6
 
 const cx = (...a) => a.filter(Boolean).join(' ')
+const metaKey = (id) => `nr.meta.${id}`
 
 function readLS(key, fallback) {
   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback } catch { return fallback }
 }
 function writeLS(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+}
+
+function readStoredMeta(id) {
+  try {
+    const raw = sessionStorage.getItem(metaKey(id))
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    if (!p || p.v !== META_VER || Date.now() - (p.ts || 0) > META_TTL) return null
+    return p.d || null
+  } catch { return null }
+}
+
+function purgeStoredMeta() {
+  try {
+    const idx = JSON.parse(sessionStorage.getItem(META_IDX) || '[]')
+    idx.forEach((x) => { try { sessionStorage.removeItem(metaKey(x)) } catch {} })
+    sessionStorage.removeItem(META_IDX)
+  } catch {}
+}
+
+function storeMeta(id, d) {
+  const write = () => {
+    sessionStorage.setItem(metaKey(id), JSON.stringify({ v: META_VER, ts: Date.now(), d }))
+    let idx = []
+    try { idx = JSON.parse(sessionStorage.getItem(META_IDX) || '[]') } catch {}
+    idx = idx.filter((x) => x !== id)
+    idx.push(id)
+    while (idx.length > META_MAX) {
+      const old = idx.shift()
+      try { sessionStorage.removeItem(metaKey(old)) } catch {}
+    }
+    sessionStorage.setItem(META_IDX, JSON.stringify(idx))
+  }
+  try { write() } catch { try { purgeStoredMeta(); write() } catch {} }
 }
 
 function useMedia(query) {
@@ -135,6 +177,7 @@ function safeFileName(s) {
   return String(s || 'track').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'track'
 }
 const fileUrl = (id, name) => `https://archive.org/download/${id}/${String(name).split('/').map(encodeURIComponent).join('/')}`
+const coverUrl = (id) => `https://archive.org/services/img/${id}`
 
 function buildTracks(data, identifier) {
   const files = Array.isArray(data?.files) ? data.files : []
@@ -164,7 +207,6 @@ function buildTracks(data, identifier) {
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
 }
 
-/** Готовый ZIP в самом релизе — предпочтительный источник архива. */
 function findZip(data, identifier) {
   const files = Array.isArray(data?.files) ? data.files : []
   const zips = files.filter((f) => f?.name && /\.zip$/i.test(f.name))
@@ -174,7 +216,6 @@ function findZip(data, identifier) {
   return { name: best.name, url: fileUrl(identifier, best.name), size: Number(best.size) || 0 }
 }
 
-/** Архив на лету: archive.org/compress/<id>/formats=... */
 function compressUrl(identifier, formats) {
   const list = [...new Set(formats.filter(Boolean))]
   const base = `https://archive.org/compress/${encodeURIComponent(identifier)}`
@@ -220,7 +261,7 @@ const IDownload = (p) => <Ico {...p} d="M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 20h14"
 const IAlbumZip = (p) => <Ico {...p}><path d="M4 7.5 12 4l8 3.5v9L12 20l-8-3.5v-9Z" {...S} /><path d="M12 12v8M4 7.5l8 4.5 8-4.5" {...S} /></Ico>
 const ICloud = (p) => <Ico {...p} d="M7 18h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 11A3.5 3.5 0 0 0 7 18Z" />
 
-function Cover({ src, alt, className, seed, style }) {
+function Cover({ src, alt, className, seed, style, eager }) {
   const [failed, setFailed] = useState(false)
   useEffect(() => { setFailed(false) }, [src])
   if (!src || failed) {
@@ -231,7 +272,7 @@ function Cover({ src, alt, className, seed, style }) {
       </div>
     )
   }
-  return <img className={className} src={src} alt={alt} loading="lazy" decoding="async" style={style} onError={() => setFailed(true)} />
+  return <img className={className} src={src} alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" style={style} onError={() => setFailed(true)} />
 }
 
 const Eq = ({ paused }) => <span className={cx('eq', paused && 'paused')} aria-hidden="true"><i /><i /><i /><i /></span>
@@ -242,6 +283,22 @@ function Skeletons({ n = 12 }) {
       {Array.from({ length: n }).map((_, i) => (
         <div className="sk sk-card" key={i}>
           <div className="sk sk-cover" /><div className="sk sk-line w40" /><div className="sk sk-line" /><div className="sk sk-line w60" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TrackSkeletons({ n = 6 }) {
+  return (
+    <div role="list" aria-hidden="true">
+      {Array.from({ length: n }).map((_, i) => (
+        <div className="track" key={i} style={{ cursor: 'default' }}>
+          <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
+          <span className="sk sk-line" style={{ margin: 0, width: `${58 + ((i * 13) % 34)}%` }} />
+          <span className="t-fmt" style={{ opacity: 0.35 }}>MP3</span>
+          <span className="sk sk-line" style={{ margin: 0, width: 38 }} />
+          <span className="t-slot" />
         </div>
       ))}
     </div>
@@ -278,6 +335,7 @@ export default function App() {
   const [dlKey, setDlKey] = useState(null)
 
   const [route, setRoute] = useState(() => readRoute())
+  const [viewShell, setViewShell] = useState(null)
   const [viewAlbum, setViewAlbum] = useState(null)
   const [viewTracks, setViewTracks] = useState([])
   const [albumLoading, setAlbumLoading] = useState(false)
@@ -305,8 +363,12 @@ export default function App() {
   const wantPlay = useRef(false)
   const pendingSeek = useRef(null)
   const metaCache = useRef(new Map())
+  const inflight = useRef(new Map())
+  const albumsRef = useRef(albums)
   const routeRef = useRef(route)
   const viewAlbumIdRef = useRef(null)
+  const loadedIdRef = useRef(null)
+  const reqToken = useRef(0)
   const navigateRef = useRef(null)
   const depth = useRef(0)
   const restored = useRef(false)
@@ -318,10 +380,19 @@ export default function App() {
   const hydrating = useRef(true)
   const mainAction = useRef({ play: null, shuffle: null })
   const lastSessionPush = useRef(0)
+  const prefetchQueue = useRef([])
+  const prefetchActive = useRef(0)
+  const prefetchSeen = useRef(new Set())
+  const prefetchAuto = useRef(0)
+  const pumpRef = useRef(() => {})
+
+  albumsRef.current = albums
 
   const current = qIndex >= 0 && qIndex < queue.length ? queue[qIndex] : null
   const view = route.name === 'album' ? 'album' : route.name === 'stats' ? 'stats' : route.name === 'links' ? 'links' : 'library'
   const showPlayer = !!(current || resume)
+  const activeAlbum = viewAlbum || viewShell
+  const albumReady = !!viewAlbum && viewAlbum.identifier === viewAlbumIdRef.current
 
   const toast = useCallback((msg, tone = 'info', action = null) => {
     const id = Math.random().toString(36).slice(2)
@@ -452,7 +523,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const visible = view === 'album' && !!viewAlbum && !showPlayer && !albumLoading
+    const visible = view === 'album' && albumReady && !showPlayer
     setMainButton({ text: 'Слушать релиз', visible })
     setSecondaryButton({
       text: 'Вперемешку',
@@ -460,7 +531,7 @@ export default function App() {
       color: theme === 'light' ? '#eceff7' : '#1b2030',
       textColor: theme === 'light' ? '#0c1020' : '#eef1f8',
     })
-  }, [view, viewAlbum, showPlayer, albumLoading, caps.secondary, theme])
+  }, [view, albumReady, showPlayer, caps.secondary, theme])
 
   useEffect(() => {
     const offMain = onMainButton(() => mainAction.current.play?.())
@@ -492,38 +563,104 @@ export default function App() {
 
   useEffect(() => { loadLibrary() }, [loadLibrary])
 
-  const fetchAlbum = useCallback(async (id) => {
-    if (metaCache.current.has(id)) return metaCache.current.get(id)
-    const res = await fetch(`https://archive.org/metadata/${encodeURIComponent(id)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    const md = data?.metadata || {}
-    const tracks = buildTracks(data, id)
-    const zip = findZip(data, id)
-    const built = {
-      identifier: id,
-      title: asText(md.title) || id,
-      creator: asText(md.creator),
-      date: md.date || md.publicdate || '',
-      cover: `https://archive.org/services/img/${id}`,
-      description: cleanDescription(md.description),
-      subjects: asArray(md.subject).map(String).slice(0, 8),
-      tracks,
-      zip,
-      archiveUrl: zip?.url || compressUrl(id, tracks.map((t) => t.format)),
-      archiveSize: zip?.size || 0,
-      archiveReady: !!zip,
+  /* ---------- метаданные: память → sessionStorage → сеть ---------- */
+  const peekAlbum = useCallback((id) => {
+    if (!id) return null
+    const hit = metaCache.current.get(id)
+    if (hit) return hit
+    const stored = readStoredMeta(id)
+    if (stored && Array.isArray(stored.tracks)) {
+      metaCache.current.set(id, stored)
+      return stored
     }
-    metaCache.current.set(id, built)
-    return built
+    return null
   }, [])
 
-  const openAlbumView = useCallback(async (id) => {
-    setAlbumLoading(true); setAlbumError(''); setDescOpen(false)
+  const fetchAlbum = useCallback((id) => {
+    const hit = peekAlbum(id)
+    if (hit) return Promise.resolve(hit)
+    const running = inflight.current.get(id)
+    if (running) return running
+
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT)
+    const job = (async () => {
+      const res = await fetch(`https://archive.org/metadata/${encodeURIComponent(id)}`, { signal: ctrl.signal })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      const md = data?.metadata || {}
+      const tracks = buildTracks(data, id)
+      const zip = findZip(data, id)
+      const built = {
+        identifier: id,
+        title: asText(md.title) || id,
+        creator: asText(md.creator),
+        date: md.date || md.publicdate || '',
+        cover: coverUrl(id),
+        description: cleanDescription(md.description),
+        subjects: asArray(md.subject).map(String).slice(0, 8),
+        tracks,
+        zip,
+        archiveUrl: zip?.url || compressUrl(id, tracks.map((t) => t.format)),
+        archiveSize: zip?.size || 0,
+        archiveReady: !!zip,
+      }
+      metaCache.current.set(id, built)
+      storeMeta(id, built)
+      return built
+    })()
+      .finally(() => { clearTimeout(timer); inflight.current.delete(id) })
+
+    inflight.current.set(id, job)
+    return job
+  }, [peekAlbum])
+
+  const pump = useCallback(() => {
+    while (prefetchActive.current < PREFETCH_CONCURRENCY && prefetchQueue.current.length) {
+      const id = prefetchQueue.current.shift()
+      if (peekAlbum(id)) continue
+      prefetchActive.current += 1
+      fetchAlbum(id).catch(() => {}).then(() => {
+        prefetchActive.current -= 1
+        pumpRef.current()
+      })
+    }
+  }, [fetchAlbum, peekAlbum])
+  pumpRef.current = pump
+
+  const prefetch = useCallback((id, { priority = false } = {}) => {
+    if (!id || prefetchSeen.current.has(id) || peekAlbum(id)) return
+    const conn = typeof navigator !== 'undefined' ? navigator.connection : null
+    if (conn && (conn.saveData || /(^|\s)2g/.test(conn.effectiveType || ''))) return
+    if (!priority && prefetchAuto.current >= PREFETCH_AUTO_MAX) return
+    prefetchSeen.current.add(id)
+    if (!priority) prefetchAuto.current += 1
+    if (priority) prefetchQueue.current.unshift(id)
+    else prefetchQueue.current.push(id)
+    pump()
+  }, [peekAlbum, pump])
+
+  /* ---------- мгновенная оболочка релиза из данных каталога ---------- */
+  const shellFor = useCallback((id) => {
+    const row = albumsRef.current.find((a) => a.identifier === id)
+    return {
+      identifier: id,
+      title: row ? asText(row.title) : '',
+      creator: row ? asText(row.creator) : '',
+      date: row?.date || row?.publicdate || '',
+      cover: coverUrl(id),
+      description: '', subjects: [], tracks: [],
+      zip: null, archiveUrl: '', archiveSize: 0, archiveReady: false,
+    }
+  }, [])
+
+  const loadInto = useCallback(async (id) => {
+    const token = ++reqToken.current
     try {
       const built = await fetchAlbum(id)
+      if (token !== reqToken.current || viewAlbumIdRef.current !== id) return
       if (!built.tracks.length) {
-        viewAlbumIdRef.current = null
+        loadedIdRef.current = null
         setHidden((h) => new Set([...h, id]))
         toast(`«${stripCatalog(built.title)}» без аудиофайлов — скрыт из каталога`, 'warn', {
           label: 'Вернуть', run: () => setHidden((h) => { const n = new Set(h); n.delete(id); return n }),
@@ -531,22 +668,48 @@ export default function App() {
         navigateRef.current?.({ name: 'library', id: null }, { replace: true })
         return
       }
-      viewAlbumIdRef.current = id
-      setViewAlbum(built); setViewTracks(built.tracks)
+      loadedIdRef.current = id
+      setViewAlbum(built)
+      setViewTracks(built.tracks)
+      setAlbumLoading(false)
       analytics.event('album', { album: id })
     } catch (e) {
-      viewAlbumIdRef.current = null
-      setAlbumError(e?.message || 'Не удалось загрузить релиз')
+      if (token !== reqToken.current || viewAlbumIdRef.current !== id) return
+      setAlbumError(e?.name === 'AbortError' ? 'Превышено время ожидания archive.org' : (e?.message || 'Не удалось загрузить релиз'))
+      setAlbumLoading(false)
       analytics.event('error')
-    } finally { setAlbumLoading(false) }
+    }
   }, [fetchAlbum, toast])
 
   const applyRoute = useCallback((next) => {
     routeRef.current = next
     setRoute(next)
-    if (next.name === 'album' && viewAlbumIdRef.current !== next.id) openAlbumView(next.id)
+
+    if (next.name === 'album' && next.id) {
+      const id = next.id
+      if (loadedIdRef.current !== id || viewAlbumIdRef.current !== id) {
+        viewAlbumIdRef.current = id
+        loadedIdRef.current = null
+        setDescOpen(false)
+        setAlbumError('')
+        setViewShell(shellFor(id))
+        const hit = peekAlbum(id)
+        if (hit && hit.tracks.length) {
+          loadedIdRef.current = id
+          setViewAlbum(hit)
+          setViewTracks(hit.tracks)
+          setAlbumLoading(false)
+          analytics.event('album', { album: id })
+        } else {
+          setViewAlbum(null)
+          setViewTracks([])
+          setAlbumLoading(true)
+          loadInto(id)
+        }
+      }
+    }
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  }, [openAlbumView])
+  }, [shellFor, peekAlbum, loadInto])
 
   const navigate = useCallback((next, { replace = false } = {}) => {
     if (!replace) depth.current += 1
@@ -585,7 +748,18 @@ export default function App() {
     if (initial.action === 'decade') setEra(String(initial.value))
     if (initial.action === 'search') setQuery(String(initial.value || ''))
     if (initial.action === 'radio') setRadioRequested(true)
-    if (initial.name === 'album' && initial.id) openAlbumView(initial.id)
+    if (initial.name === 'album' && initial.id) {
+      viewAlbumIdRef.current = initial.id
+      setViewShell(shellFor(initial.id))
+      const hit = peekAlbum(initial.id)
+      if (hit && hit.tracks.length) {
+        loadedIdRef.current = initial.id
+        setViewAlbum(hit); setViewTracks(hit.tracks); setAlbumLoading(false)
+      } else {
+        setAlbumLoading(true)
+        loadInto(initial.id)
+      }
+    }
 
     const syncRoute = () => {
       const next = readRoute()
@@ -597,7 +771,7 @@ export default function App() {
     window.addEventListener('popstate', syncRoute)
     window.addEventListener('hashchange', syncRoute)
     return () => { window.removeEventListener('popstate', syncRoute); window.removeEventListener('hashchange', syncRoute) }
-  }, [applyRoute, openAlbumView])
+  }, [applyRoute, loadInto, peekAlbum, shellFor])
 
   useEffect(() => {
     const bb = tg?.BackButton
@@ -637,12 +811,32 @@ export default function App() {
   const resetFilters = useCallback(() => { setFavOnly(false); setEra('all'); setQuery(''); analytics.event('filter') }, [])
   const filtersActive = favOnly || era !== 'all' || query.trim() !== ''
 
+  /* ---------- прогрев видимых карточек ---------- */
+  useEffect(() => {
+    if (view !== 'library' || !filtered.length) return
+    if (typeof IntersectionObserver === 'undefined') return
+    let io = null
+    const timer = setTimeout(() => {
+      io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (!e.isIntersecting) return
+          const id = e.target.getAttribute('data-album')
+          io.unobserve(e.target)
+          if (id) prefetch(id)
+        })
+      }, { rootMargin: '0px' })
+      document.querySelectorAll('[data-album]').forEach((el) => io.observe(el))
+    }, 900)
+    return () => { clearTimeout(timer); if (io) io.disconnect() }
+  }, [view, filtered.length, prefetch])
+
+  const activeId = activeAlbum?.identifier || null
   const albumUnlocked = useMemo(() => {
-    if (!viewAlbum) return false
-    const prefix = `${viewAlbum.identifier}/`
+    if (!activeId) return false
+    const prefix = `${activeId}/`
     for (const k of played) if (k.startsWith(prefix)) return true
     return false
-  }, [played, viewAlbum])
+  }, [played, activeId])
 
   const onSearch = useCallback((v) => {
     setQuery(v)
@@ -692,7 +886,7 @@ export default function App() {
   }, [viewAlbum, viewTracks, playerAlbum, queue, startAlbum, requestPlay, haptic])
 
   const playAlbum = useCallback((album, { shuffled = false } = {}) => {
-    const hit = metaCache.current.get(album.identifier)
+    const hit = peekAlbum(album.identifier)
     if (hit?.tracks?.length) {
       if (shuffled) setShuffle(true)
       startAlbum(hit, hit.tracks, null, shuffled ? true : null)
@@ -703,7 +897,7 @@ export default function App() {
       if (shuffled) setShuffle(true)
       startAlbum(built, built.tracks, null, shuffled ? true : null)
     }).catch(() => toast('Не удалось загрузить релиз', 'error'))
-  }, [fetchAlbum, startAlbum, toast])
+  }, [fetchAlbum, peekAlbum, startAlbum, toast])
 
   const startRadio = useCallback(() => {
     const pool = filtered.length ? filtered : visibleAlbums
@@ -721,8 +915,8 @@ export default function App() {
   }, [radioRequested, visibleAlbums, startRadio])
 
   mainAction.current = {
-    play: viewAlbum ? () => startAlbum(viewAlbum, viewTracks, null, false) : null,
-    shuffle: viewAlbum ? () => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) } : null,
+    play: albumReady ? () => startAlbum(viewAlbum, viewTracks, null, false) : null,
+    shuffle: albumReady ? () => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) } : null,
   }
 
   const nextAlbumAuto = useCallback(async (dir = 1) => {
@@ -739,13 +933,16 @@ export default function App() {
           setPlayerAlbum(built); setBaseTracks(built.tracks); setQueue(order); setQIndex(0)
           setCurrentTime(0); setBuffered(0); setDuration(order[0]?.duration || 0)
           countedPlay.current = null
-          requestPlay(); return
+          requestPlay()
+          const nextIdx = (idx + dir + pool.length) % pool.length
+          prefetch(pool[nextIdx].identifier, { priority: true })
+          return
         }
       } catch {}
     }
     wantPlay.current = false; setBuffering(false)
     toast('Больше нет релизов с аудио', 'warn')
-  }, [visibleAlbums, playerAlbum, fetchAlbum, shuffle, requestPlay, toast])
+  }, [visibleAlbums, playerAlbum, fetchAlbum, shuffle, requestPlay, toast, prefetch])
 
   const markSkip = useCallback(() => {
     const a = audioRef.current
@@ -864,14 +1061,13 @@ export default function App() {
   const shareStory = useCallback((album) => {
     if (!album) return
     const ok = shareToStory(album.cover, {
-      text: `${stripCatalog(album.title)} — Nenormalizm Recs`,
+      text: `${stripCatalog(album.title) || catalogOf(album)} — Nenormalizm Recs`,
       url: albumLink(album),
       name: 'Слушать',
     })
     if (!ok) toast('Истории недоступны в этом клиенте Telegram', 'warn')
   }, [albumLink, toast])
 
-  /* ---------- загрузка: только прослушанное ---------- */
   const downloadTrack = useCallback(async (track) => {
     if (!track || !played.has(track.key)) return
     setDlKey(track.key)
@@ -889,7 +1085,7 @@ export default function App() {
   }, [played, caps.download, toast])
 
   const downloadAlbum = useCallback(async (album) => {
-    if (!album || !albumUnlocked) return
+    if (!album || !album.archiveUrl || !albumUnlocked) return
     const size = album.archiveSize ? ` (${fmtSize(album.archiveSize)})` : ''
     const note = album.archiveReady
       ? `Скачать релиз целиком одним ZIP${size}?`
@@ -1056,9 +1252,15 @@ export default function App() {
 
   const goToPlaying = useCallback(() => {
     if (!playerAlbum) return
-    if (viewAlbumIdRef.current !== playerAlbum.identifier) {
+    if (loadedIdRef.current !== playerAlbum.identifier) {
+      reqToken.current += 1
       viewAlbumIdRef.current = playerAlbum.identifier
-      setViewAlbum(playerAlbum); setViewTracks(baseTracks); setAlbumError(''); setDescOpen(false)
+      loadedIdRef.current = playerAlbum.identifier
+      metaCache.current.set(playerAlbum.identifier, playerAlbum)
+      setViewShell(playerAlbum)
+      setViewAlbum(playerAlbum)
+      setViewTracks(baseTracks)
+      setAlbumLoading(false); setAlbumError(''); setDescOpen(false)
     }
     navigate({ name: 'album', id: playerAlbum.identifier })
   }, [playerAlbum, baseTracks, navigate])
@@ -1201,19 +1403,25 @@ export default function App() {
                   {filtered.map((a, i) => {
                     const playing = playerAlbum?.identifier === a.identifier
                     const fav = favs.has(a.identifier)
+                    const warm = () => prefetch(a.identifier, { priority: true })
                     return (
                       <div
                         key={a.identifier}
+                        data-album={a.identifier}
                         className={cx('card', playing && 'playing')}
                         style={{ animationDelay: `${Math.min(i, 16) * 26}ms` }}
                         role="button"
                         tabIndex={0}
+                        onPointerEnter={warm}
+                        onPointerDown={warm}
+                        onFocus={warm}
+                        onTouchStart={warm}
                         onClick={() => navigate({ name: 'album', id: a.identifier })}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate({ name: 'album', id: a.identifier }) } }}
                         aria-label={`Открыть релиз ${a.title}`}
                       >
                         <div className="card-cover-wrap">
-                          <Cover className="card-cover" src={`https://archive.org/services/img/${a.identifier}`} alt={a.title} seed={a.identifier} />
+                          <Cover className="card-cover" src={coverUrl(a.identifier)} alt={a.title} seed={a.identifier} />
                           {playing && <span className="card-eq"><Eq paused={!isPlaying} /></span>}
                           <button className={cx('card-fav', fav && 'on')} onClick={(e) => { e.stopPropagation(); toggleFav(a.identifier) }} aria-label={fav ? 'Убрать из избранного' : 'В избранное'} aria-pressed={fav}>
                             <IHeart size={16} filled={fav} />
@@ -1262,30 +1470,26 @@ export default function App() {
           </>
         )}
 
-        {view === 'album' && (
+        {view === 'album' && activeAlbum && (
           <>
             <div className="album-bar">
               <div className="wrap album-bar-in">
                 <button className="back-btn" onClick={goBack}><IBack size={17} /> Назад к каталогу</button>
                 <button className="bar-logo" onClick={goHome} aria-label="В каталог"><Logo h={28} playing={isPlaying} /></button>
-                <span className="crumb">Библиотека / {viewAlbum ? catalogOf(viewAlbum) : route.id}</span>
+                <span className="crumb">Библиотека / {catalogOf(activeAlbum)}</span>
                 <div className="bar-actions">
-                  {viewAlbum && (
-                    <button className="icon-btn" onClick={() => shareAlbum(viewAlbum)} aria-label="Скопировать ссылку на релиз" title="Скопировать ссылку">
-                      <ILink size={17} />
-                    </button>
-                  )}
-                  {viewAlbum && (
-                    <button
-                      className="icon-btn"
-                      aria-pressed={favs.has(viewAlbum.identifier)}
-                      style={favs.has(viewAlbum.identifier) ? { color: 'var(--magenta)', borderColor: 'var(--magenta)' } : undefined}
-                      onClick={() => toggleFav(viewAlbum.identifier)}
-                      aria-label={favs.has(viewAlbum.identifier) ? 'Убрать из избранного' : 'В избранное'}
-                    >
-                      <IHeart size={17} filled={favs.has(viewAlbum.identifier)} />
-                    </button>
-                  )}
+                  <button className="icon-btn" onClick={() => shareAlbum(activeAlbum)} aria-label="Скопировать ссылку на релиз" title="Скопировать ссылку">
+                    <ILink size={17} />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    aria-pressed={favs.has(activeAlbum.identifier)}
+                    style={favs.has(activeAlbum.identifier) ? { color: 'var(--magenta)', borderColor: 'var(--magenta)' } : undefined}
+                    onClick={() => toggleFav(activeAlbum.identifier)}
+                    aria-label={favs.has(activeAlbum.identifier) ? 'Убрать из избранного' : 'В избранное'}
+                  >
+                    <IHeart size={17} filled={favs.has(activeAlbum.identifier)} />
+                  </button>
                   <button className="icon-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Сменить тему">
                     {theme === 'dark' ? <ISun size={17} /> : <IMoon size={17} />}
                   </button>
@@ -1293,134 +1497,152 @@ export default function App() {
               </div>
             </div>
 
-            {albumLoading && !viewAlbum && (
-              <div className="wrap" style={{ paddingTop: 28 }}>
-                <div className="sk" style={{ height: 232, marginBottom: 20 }} />
-                <div className="sk sk-line w60" /><div className="sk sk-line w40" />
-              </div>
-            )}
-
-            {albumError && (
+            {albumError && !albumReady && (
               <div className="wrap">
                 <div className="state error">
                   <div className="state-icon"><IAlert size={24} /></div>
                   <h3>Релиз не открылся</h3>
                   <p>{albumError}</p>
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <button className="btn btn-primary" onClick={() => openAlbumView(route.id)}><IRetry size={15} /> Повторить</button>
+                    <button className="btn btn-primary" onClick={() => { setAlbumError(''); setAlbumLoading(true); loadInto(activeAlbum.identifier) }}><IRetry size={15} /> Повторить</button>
                     <button className="btn btn-ghost" onClick={goBack}><IBack size={15} /> В каталог</button>
                   </div>
                 </div>
               </div>
             )}
 
-            {viewAlbum && (
-              <>
-                <div className="hero">
-                  <Cover className="hero-bg" src={viewAlbum.cover} alt="" seed={viewAlbum.identifier} />
-                  <div className="hero-fade" />
-                  <div className="wrap hero-in">
-                    <Cover className="hero-cover" src={viewAlbum.cover} alt={viewAlbum.title} seed={viewAlbum.identifier} />
-                    <div>
-                      <div className="hero-cat"><IDisc size={13} /> {catalogOf(viewAlbum)}</div>
-                      <h1 className="hero-title">{stripCatalog(viewAlbum.title) || viewAlbum.identifier}</h1>
-                      {viewAlbum.creator && <div className="hero-artist">{viewAlbum.creator}</div>}
-                      <div className="hero-meta">
-                        {yearOf(viewAlbum) && <span className="tag accent">{yearOf(viewAlbum)}</span>}
+            <div className="hero">
+              <Cover className="hero-bg" src={activeAlbum.cover} alt="" seed={activeAlbum.identifier} eager />
+              <div className="hero-fade" />
+              <div className="wrap hero-in">
+                <Cover className="hero-cover" src={activeAlbum.cover} alt={activeAlbum.title || activeAlbum.identifier} seed={activeAlbum.identifier} eager />
+                <div>
+                  <div className="hero-cat"><IDisc size={13} /> {catalogOf(activeAlbum)}</div>
+                  {activeAlbum.title
+                    ? <h1 className="hero-title">{stripCatalog(activeAlbum.title) || activeAlbum.identifier}</h1>
+                    : <div className="sk sk-line" style={{ height: 30, width: '78%', marginBottom: 10 }} />}
+                  {activeAlbum.creator
+                    ? <div className="hero-artist">{activeAlbum.creator}</div>
+                    : (albumLoading && <div className="sk sk-line" style={{ height: 15, width: '42%', marginBottom: 16 }} />)}
+                  <div className="hero-meta">
+                    {yearOf(activeAlbum) && <span className="tag accent">{yearOf(activeAlbum)}</span>}
+                    {albumReady ? (
+                      <>
                         <span className="tag">{viewTracks.length} {pluralTracks(viewTracks.length)}</span>
                         {totalView > 0 && <span className="tag">{fmtTime(totalView)}</span>}
                         {viewAlbum.subjects.map((s) => <span className="tag cyan" key={s}>{s}</span>)}
-                      </div>
-                      <div className="hero-actions">
-                        <button className="btn btn-primary" onClick={() => startAlbum(viewAlbum, viewTracks, null, false)}><IPlay size={15} /> Слушать релиз</button>
-                        <button className="btn btn-ghost" onClick={() => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) }}><IShuffle size={15} /> Вперемешку</button>
-                        {caps.story && <button className="btn btn-ghost" onClick={() => shareStory(viewAlbum)}><IStory size={15} /> В историю</button>}
-                        {albumUnlocked && (
-                          <button className="btn btn-ghost" onClick={() => downloadAlbum(viewAlbum)} disabled={dlKey === `album:${viewAlbum.identifier}`}>
-                            <IAlbumZip size={15} />
-                            {dlKey === `album:${viewAlbum.identifier}` ? 'Готовим архив…' : `Скачать релиз ZIP${viewAlbum.archiveSize ? ` · ${fmtSize(viewAlbum.archiveSize)}` : ''}`}
-                          </button>
-                        )}
-                      </div>
-                      {!albumUnlocked && (
-                        <div className="hero-hint">Загрузка откроется после прослушивания: отдельный трек — после его воспроизведения, весь релиз — после любого трека из него.</div>
-                      )}
-                      {viewAlbum.description && (
-                        <div className="desc">
-                          {viewAlbum.description.length > 320 && !descOpen ? viewAlbum.description.slice(0, 320).trimEnd() + '…' : viewAlbum.description}
-                          {viewAlbum.description.length > 320 && (
-                            <button className="desc-toggle" onClick={() => setDescOpen((v) => !v)}>{descOpen ? 'Свернуть ▲' : 'Показать полностью ▼'}</button>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="sk" style={{ width: 74, height: 22, borderRadius: 6 }} />
+                        <span className="sk" style={{ width: 58, height: 22, borderRadius: 6 }} />
+                        <span className="sk" style={{ width: 92, height: 22, borderRadius: 6 }} />
+                      </>
+                    )}
                   </div>
-                </div>
-
-                <div className="wrap">
-                  {playerAlbum && current && playerAlbum.identifier !== viewAlbum.identifier && (
-                    <div className="now-other">
-                      <span className="lbl">Сейчас играет</span>
-                      <span className="txt">{current.title} — {stripCatalog(playerAlbum.title)}</span>
-                      <button className="btn btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={goToPlaying}><IUp size={14} /> Перейти</button>
+                  <div className="hero-actions">
+                    <button className="btn btn-primary" onClick={() => startAlbum(viewAlbum, viewTracks, null, false)} disabled={!albumReady}>
+                      <IPlay size={15} /> Слушать релиз
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) }} disabled={!albumReady}>
+                      <IShuffle size={15} /> Вперемешку
+                    </button>
+                    {caps.story && <button className="btn btn-ghost" onClick={() => shareStory(activeAlbum)}><IStory size={15} /> В историю</button>}
+                    {albumReady && albumUnlocked && (
+                      <button className="btn btn-ghost" onClick={() => downloadAlbum(viewAlbum)} disabled={dlKey === `album:${viewAlbum.identifier}`}>
+                        <IAlbumZip size={15} />
+                        {dlKey === `album:${viewAlbum.identifier}` ? 'Готовим архив…' : `Скачать релиз ZIP${viewAlbum.archiveSize ? ` · ${fmtSize(viewAlbum.archiveSize)}` : ''}`}
+                      </button>
+                    )}
+                  </div>
+                  {!albumUnlocked && (
+                    <div className="hero-hint">Загрузка откроется после прослушивания: отдельный трек — после его воспроизведения, весь релиз — после любого трека из него.</div>
+                  )}
+                  {albumReady && viewAlbum.description && (
+                    <div className="desc">
+                      {viewAlbum.description.length > 320 && !descOpen ? viewAlbum.description.slice(0, 320).trimEnd() + '…' : viewAlbum.description}
+                      {viewAlbum.description.length > 320 && (
+                        <button className="desc-toggle" onClick={() => setDescOpen((v) => !v)}>{descOpen ? 'Свернуть ▲' : 'Показать полностью ▼'}</button>
+                      )}
                     </div>
                   )}
-
-                  <div className="tracks">
-                    <div className="tracks-head">
-                      <h3>Треклист</h3>
-                      <span className="sum">{viewTracks.length} · {fmtTime(totalView)}{playedInView ? ` · прослушано ${playedInView}` : ''}</span>
+                  {!albumReady && albumLoading && !albumError && (
+                    <div className="desc" aria-hidden="true">
+                      <div className="sk sk-line" />
+                      <div className="sk sk-line" />
+                      <div className="sk sk-line w60" style={{ marginBottom: 0 }} />
                     </div>
-                    <div role="list">
-                      {viewTracks.map((t, i) => {
-                        const isCur = current?.key === t.key
-                        const canDl = played.has(t.key)
-                        return (
-                          <div
-                            key={t.key}
-                            role="listitem button"
-                            tabIndex={0}
-                            className="track"
-                            aria-current={isCur ? 'true' : undefined}
-                            onClick={() => playFromView(t)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); playFromView(t) } }}
-                            title={t.title}
-                          >
-                            <span className="t-num">{isCur ? <Eq paused={!isPlaying} /> : String(i + 1).padStart(2, '0')}</span>
-                            <span className="t-title">{t.title}</span>
-                            <span className="t-fmt">{FORMAT_SHORT[t.format] || t.format}</span>
-                            <span className="t-time">{t.duration ? fmtTime(t.duration) : '—'}</span>
-                            {canDl ? (
-                              <button
-                                className="t-dl"
-                                onClick={(e) => { e.stopPropagation(); downloadTrack(t) }}
-                                disabled={dlKey === t.key}
-                                aria-label={`Скачать ${t.title}`}
-                                title="Скачать трек"
-                              >
-                                {dlKey === t.key ? <span className="spinner" style={{ width: 13, height: 13 }} /> : <IDownload size={15} />}
-                              </button>
-                            ) : <span className="t-slot" aria-hidden="true" />}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="album-foot">
-                    <IDisc size={14} /><span>Источник:</span>
-                    <button className="btn btn-quiet" style={{ height: 30, padding: '0 8px', fontSize: 12 }} onClick={() => openExternal(`https://archive.org/details/${encodeURIComponent(viewAlbum.identifier)}`, true)}>
-                      archive.org/details/{viewAlbum.identifier}
-                    </button>
-                  </div>
+                  )}
                 </div>
-              </>
-            )}
+              </div>
+            </div>
+
+            <div className="wrap">
+              {playerAlbum && current && playerAlbum.identifier !== activeAlbum.identifier && (
+                <div className="now-other">
+                  <span className="lbl">Сейчас играет</span>
+                  <span className="txt">{current.title} — {stripCatalog(playerAlbum.title)}</span>
+                  <button className="btn btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={goToPlaying}><IUp size={14} /> Перейти</button>
+                </div>
+              )}
+
+              <div className="tracks">
+                <div className="tracks-head">
+                  <h3>Треклист</h3>
+                  {albumReady
+                    ? <span className="sum">{viewTracks.length} · {fmtTime(totalView)}{playedInView ? ` · прослушано ${playedInView}` : ''}</span>
+                    : <span className="sum" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span className="spinner" style={{ width: 12, height: 12 }} /> загружаем</span>}
+                </div>
+                {albumReady ? (
+                  <div role="list">
+                    {viewTracks.map((t, i) => {
+                      const isCur = current?.key === t.key
+                      const canDl = played.has(t.key)
+                      return (
+                        <div
+                          key={t.key}
+                          role="listitem button"
+                          tabIndex={0}
+                          className="track"
+                          aria-current={isCur ? 'true' : undefined}
+                          onClick={() => playFromView(t)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); playFromView(t) } }}
+                          title={t.title}
+                        >
+                          <span className="t-num">{isCur ? <Eq paused={!isPlaying} /> : String(i + 1).padStart(2, '0')}</span>
+                          <span className="t-title">{t.title}</span>
+                          <span className="t-fmt">{FORMAT_SHORT[t.format] || t.format}</span>
+                          <span className="t-time">{t.duration ? fmtTime(t.duration) : '—'}</span>
+                          {canDl ? (
+                            <button
+                              className="t-dl"
+                              onClick={(e) => { e.stopPropagation(); downloadTrack(t) }}
+                              disabled={dlKey === t.key}
+                              aria-label={`Скачать ${t.title}`}
+                              title="Скачать трек"
+                            >
+                              {dlKey === t.key ? <span className="spinner" style={{ width: 13, height: 13 }} /> : <IDownload size={15} />}
+                            </button>
+                          ) : <span className="t-slot" aria-hidden="true" />}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : <TrackSkeletons n={6} />}
+              </div>
+
+              <div className="album-foot">
+                <IDisc size={14} /><span>Источник:</span>
+                <button className="btn btn-quiet" style={{ height: 30, padding: '0 8px', fontSize: 12 }} onClick={() => openExternal(`https://archive.org/details/${encodeURIComponent(activeAlbum.identifier)}`, true)}>
+                  archive.org/details/{activeAlbum.identifier}
+                </button>
+              </div>
+            </div>
           </>
         )}
 
         {view === 'stats' && <Stats albums={visibleAlbums} onBack={goBack} />}
-        {view === 'links' && <Links albums={visibleAlbums} onBack={goBack} currentAlbumId={viewAlbum?.identifier || null} />}
+        {view === 'links' && <Links albums={visibleAlbums} onBack={goBack} currentAlbumId={activeId} />}
 
         <div className="player-spacer" aria-hidden="true" />
       </div>
