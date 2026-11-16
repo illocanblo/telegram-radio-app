@@ -260,6 +260,11 @@ const IStory = (p) => <Ico {...p}><rect x="3.5" y="3.5" width="17" height="17" r
 const IDownload = (p) => <Ico {...p} d="M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 20h14" />
 const IAlbumZip = (p) => <Ico {...p}><path d="M4 7.5 12 4l8 3.5v9L12 20l-8-3.5v-9Z" {...S} /><path d="M12 12v8M4 7.5l8 4.5 8-4.5" {...S} /></Ico>
 const ICloud = (p) => <Ico {...p} d="M7 18h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 11A3.5 3.5 0 0 0 7 18Z" />
+const IChev = (p) => <Ico {...p} d="M6 9.5l6 6 6-6" />
+const ISortNew = (p) => <Ico {...p} d="M4 6h10M4 12h7M4 18h4M18 5v14M18 19l-3.2-3.2M18 19l3.2-3.2" />
+const ISortOld = (p) => <Ico {...p} d="M4 6h4M4 12h7M4 18h10M18 19V5M18 5l-3.2 3.2M18 5l3.2 3.2" />
+const ISortAlpha = (p) => <Ico {...p} d="M3 18l3.6-11 3.6 11M4.4 14.2h4.4M14 7h6l-6 10h6" />
+const ISortArtist = (p) => <Ico {...p}><circle cx="12" cy="8.5" r="3.6" {...S} /><path d="M5 20a7 7 0 0 1 14 0" {...S} /></Ico>
 
 function Cover({ src, alt, className, seed, style, eager }) {
   const [failed, setFailed] = useState(false)
@@ -305,6 +310,104 @@ function TrackSkeletons({ n = 6 }) {
   )
 }
 
+function SortMenu({ value, options, onChange, open, onOpenChange, count }) {
+  const wrapRef = useRef(null)
+  const btnRef = useRef(null)
+  const itemRefs = useRef([])
+  const selected = Math.max(0, options.findIndex((o) => o.value === value))
+  const [cursor, setCursor] = useState(selected)
+
+  useEffect(() => {
+    if (!open) return
+    setCursor(selected)
+    const onDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) onOpenChange(false)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    const id = requestAnimationFrame(() => { itemRefs.current[selected]?.focus() })
+    return () => { document.removeEventListener('pointerdown', onDown, true); cancelAnimationFrame(id) }
+  }, [open, selected, onOpenChange])
+
+  const close = (focusBack = true) => {
+    onOpenChange(false)
+    if (focusBack) requestAnimationFrame(() => btnRef.current?.focus())
+  }
+
+  const pick = (v) => { onChange(v); close() }
+
+  const onListKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return }
+    if (e.key === 'Tab') { close(false); return }
+    let next = cursor
+    if (e.key === 'ArrowDown') next = (cursor + 1) % options.length
+    else if (e.key === 'ArrowUp') next = (cursor - 1 + options.length) % options.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = options.length - 1
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); pick(options[cursor].value); return }
+    else return
+    e.preventDefault(); e.stopPropagation()
+    setCursor(next)
+    itemRefs.current[next]?.focus()
+  }
+
+  const active = options[selected]
+
+  return (
+    <div className="sortwrap tb-sort" ref={wrapRef}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="sortbtn"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Сортировка: ${active.label}`}
+        onClick={() => onOpenChange(!open)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault(); e.stopPropagation(); onOpenChange(true)
+          }
+        }}
+      >
+        <span className="dot" aria-hidden="true" />
+        <span className="lbl">{active.label}</span>
+        <span className="chev"><IChev size={15} /></span>
+      </button>
+
+      {open && (
+        <div className="sortmenu" role="dialog" aria-label="Сортировка каталога">
+          <div className="sortmenu-head">
+            <b>Порядок релизов</b>
+            <s>{count}</s>
+          </div>
+          <div className="sortmenu-list" role="listbox" aria-label="Сортировка" onKeyDown={onListKey}>
+            {options.map((o, i) => (
+              <button
+                key={o.value}
+                ref={(el) => { itemRefs.current[i] = el }}
+                type="button"
+                role="option"
+                aria-selected={o.value === value}
+                tabIndex={i === cursor ? 0 : -1}
+                className="sortopt"
+                style={{ animationDelay: `${i * 32}ms` }}
+                onMouseEnter={() => setCursor(i)}
+                onClick={(e) => { e.stopPropagation(); pick(o.value) }}
+              >
+                <span className="ico">{o.icon}</span>
+                <span className="txt"><b>{o.label}</b><span>{o.hint}</span></span>
+                <span className="mark"><ICheck size={16} /></span>
+              </button>
+            ))}
+          </div>
+          <div className="sortmenu-foot">
+            <ICloud size={13} /> выбор сохраняется между устройствами
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
   const isPhone = useMedia('(max-width: 640px)')
   const [caps] = useState(() => capabilities())
@@ -312,6 +415,7 @@ export default function App() {
   const initialPrefs = readLS(K.prefs, {})
   const [theme, setTheme] = useState(initialPrefs.theme || document.documentElement.dataset.theme || 'dark')
   const [sort, setSort] = useState(initialPrefs.sort || 'new')
+  const [sortOpen, setSortOpen] = useState(false)
   const [density, setDensity] = useState(initialPrefs.density || 'grid')
   const [era, setEra] = useState(initialPrefs.era || 'all')
   const [favOnly, setFavOnly] = useState(!!initialPrefs.favOnly)
@@ -360,6 +464,7 @@ export default function App() {
   const audioRef = useRef(null)
   const playerRef = useRef(null)
   const seekRef = useRef(null)
+  const searchRef = useRef(null)
   const wantPlay = useRef(false)
   const pendingSeek = useRef(null)
   const metaCache = useRef(new Map())
@@ -394,6 +499,13 @@ export default function App() {
   const activeAlbum = viewAlbum || viewShell
   const albumReady = !!viewAlbum && viewAlbum.identifier === viewAlbumIdRef.current
 
+  const sortOptions = useMemo(() => ([
+    { value: 'new', label: 'Сначала новые', hint: 'по дате публикации', icon: <ISortNew size={16} /> },
+    { value: 'old', label: 'Сначала старые', hint: 'с начала архива', icon: <ISortOld size={16} /> },
+    { value: 'title', label: 'По названию', hint: 'А → Я, без каталожного номера', icon: <ISortAlpha size={16} /> },
+    { value: 'artist', label: 'По артисту', hint: 'А → Я, Various Artists в конце', icon: <ISortArtist size={16} /> },
+  ]), [])
+
   const toast = useCallback((msg, tone = 'info', action = null) => {
     const id = Math.random().toString(36).slice(2)
     setToasts((t) => [...t.slice(-3), { id, msg, tone, action }])
@@ -404,7 +516,6 @@ export default function App() {
 
   useEffect(() => { analytics.init({ theme }) }, [])
 
-  /* ---------- облачная синхронизация ---------- */
   useEffect(() => {
     if (!sync.enabled) { hydrating.current = false; return }
     let alive = true
@@ -443,7 +554,6 @@ export default function App() {
     return () => { alive = false; window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', onVis) }
   }, [toast])
 
-  /* ---------- размеры плеера ---------- */
   useEffect(() => {
     const rs = document.documentElement.style
     const el = playerRef.current
@@ -539,6 +649,8 @@ export default function App() {
     return () => { offMain(); offSecondary() }
   }, [])
 
+  useEffect(() => { if (view !== 'library') setSortOpen(false) }, [view])
+
   const loadLibrary = useCallback(async () => {
     setLibLoading(true); setLibError('')
     try {
@@ -563,7 +675,6 @@ export default function App() {
 
   useEffect(() => { loadLibrary() }, [loadLibrary])
 
-  /* ---------- метаданные: память → sessionStorage → сеть ---------- */
   const peekAlbum = useCallback((id) => {
     if (!id) return null
     const hit = metaCache.current.get(id)
@@ -608,8 +719,7 @@ export default function App() {
       metaCache.current.set(id, built)
       storeMeta(id, built)
       return built
-    })()
-      .finally(() => { clearTimeout(timer); inflight.current.delete(id) })
+    })().finally(() => { clearTimeout(timer); inflight.current.delete(id) })
 
     inflight.current.set(id, job)
     return job
@@ -640,7 +750,6 @@ export default function App() {
     pump()
   }, [peekAlbum, pump])
 
-  /* ---------- мгновенная оболочка релиза из данных каталога ---------- */
   const shellFor = useCallback((id) => {
     const row = albumsRef.current.find((a) => a.identifier === id)
     return {
@@ -811,7 +920,6 @@ export default function App() {
   const resetFilters = useCallback(() => { setFavOnly(false); setEra('all'); setQuery(''); analytics.event('filter') }, [])
   const filtersActive = favOnly || era !== 'all' || query.trim() !== ''
 
-  /* ---------- прогрев видимых карточек ---------- */
   useEffect(() => {
     if (view !== 'library' || !filtered.length) return
     if (typeof IntersectionObserver === 'undefined') return
@@ -842,6 +950,12 @@ export default function App() {
     setQuery(v)
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => { if (v.trim()) analytics.event('search') }, 900)
+  }, [])
+
+  const clearSearch = useCallback(() => {
+    setQuery('')
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchRef.current?.focus()
   }, [])
 
   const requestPlay = useCallback(() => {
@@ -1221,15 +1335,20 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (sortOpen) return
       const t = e.target
       const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       if (e.key === 'Escape') {
         if (queueOpen) { setQueueOpen(false); e.preventDefault(); return }
-        if (typing) { t.blur(); hideKeyboard(); return }
+        if (typing) {
+          if (t === searchRef.current && query) { clearSearch(); e.preventDefault(); return }
+          t.blur(); hideKeyboard(); return
+        }
         if (view !== 'library') { goBack(); e.preventDefault() }
         return
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === '/' && view === 'library') { e.preventDefault(); searchRef.current?.focus(); return }
       switch (e.key) {
         case ' ': e.preventDefault(); togglePlay(); break
         case 'ArrowRight': if (audioRef.current && current) { audioRef.current.currentTime = Math.min(duration || 0, audioRef.current.currentTime + 5); e.preventDefault() } break
@@ -1248,7 +1367,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, toggleShuffle, cycleRepeat, playNext, playPrev, goBack, view, queueOpen, current, duration, caps.fullscreen])
+  }, [sortOpen, togglePlay, toggleShuffle, cycleRepeat, playNext, playPrev, goBack, view, queueOpen, current, duration, caps.fullscreen, query, clearSearch])
 
   const goToPlaying = useCallback(() => {
     if (!playerAlbum) return
@@ -1314,14 +1433,23 @@ export default function App() {
                 <div className="search tb-search">
                   <ISearch size={16} />
                   <input
+                    ref={searchRef}
                     type="search"
                     value={query}
                     onChange={(e) => onSearch(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); hideKeyboard() } }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.currentTarget.blur(); hideKeyboard() }
+                      if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); clearSearch() }
+                    }}
+                    enterKeyHint="search"
+                    autoComplete="off"
+                    spellCheck="false"
                     placeholder="Поиск: релиз, артист, каталог…"
                     aria-label="Поиск по каталогу"
                   />
-                  {query && <button className="search-clear" onClick={() => setQuery('')} aria-label="Очистить поиск"><IClose size={15} /></button>}
+                  {query
+                    ? <button className="search-clear" onClick={clearSearch} aria-label="Очистить поиск" title="Очистить"><IClose size={15} /></button>
+                    : <span className="search-kbd" aria-hidden="true">/</span>}
                 </div>
 
                 <button className="btn btn-primary tb-radio" onClick={startRadio} disabled={!visibleAlbums.length}>
@@ -1337,12 +1465,14 @@ export default function App() {
                   ))}
                 </div>
 
-                <select className="select tb-sort" value={sort} onChange={(e) => { setSort(e.target.value); analytics.event('filter') }} aria-label="Сортировка">
-                  <option value="new">Сначала новые</option>
-                  <option value="old">Сначала старые</option>
-                  <option value="title">По названию</option>
-                  <option value="artist">По артисту</option>
-                </select>
+                <SortMenu
+                  value={sort}
+                  options={sortOptions}
+                  count={filtered.length}
+                  open={sortOpen}
+                  onOpenChange={setSortOpen}
+                  onChange={(v) => { setSort(v); analytics.event('filter'); haptic() }}
+                />
 
                 <button className="icon-btn tb-density" aria-pressed={density === 'list'} onClick={() => { setDensity(density === 'grid' ? 'list' : 'grid'); analytics.event('filter') }} aria-label="Плотность списка" title="Плитка / список">
                   {density === 'grid' ? <IList size={17} /> : <IGrid size={17} />}

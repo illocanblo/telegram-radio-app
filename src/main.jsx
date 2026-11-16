@@ -20,21 +20,35 @@ try {
   root.dataset.theme = 'dark'
 }
 
+const HEADER_ALLOWANCE = 56
+
 function applyInsets() {
   if (!inTelegram) {
     root.style.removeProperty('--tg-top')
     root.style.removeProperty('--tg-bottom')
     return
   }
+  const safe = tg.safeAreaInset || { top: 0, bottom: 0 }
   const c = tg.contentSafeAreaInset
-  const has = c && (c.top || c.bottom || c.left || c.right)
-  if (has) {
-    root.style.setProperty('--tg-top', `${c.top || 0}px`)
-    root.style.setProperty('--tg-bottom', `${c.bottom || 0}px`)
+  let top = 0
+  let bottom = 0
+
+  if (c && (c.top || c.bottom || c.left || c.right)) {
+    top = c.top || 0
+    bottom = c.bottom || 0
   } else {
-    root.style.setProperty('--tg-top', '56px')
-    root.style.setProperty('--tg-bottom', '0px')
+    top = (safe.top || 0) + HEADER_ALLOWANCE
+    bottom = safe.bottom || 0
   }
+
+  // Часть клиентов отдаёт только системный вырез, без собственной шапки.
+  // Нижний предел гарантирует, что контент не уедет под «Закрыть».
+  let full = false
+  try { full = !!tg.isFullscreen } catch {}
+  if (isMobileTg && !full) top = Math.max(top, (safe.top || 0) + HEADER_ALLOWANCE)
+
+  root.style.setProperty('--tg-top', `${top}px`)
+  root.style.setProperty('--tg-bottom', `${bottom}px`)
 }
 
 applyInsets()
