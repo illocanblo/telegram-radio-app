@@ -2,9 +2,9 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
+import { tg, setBottomBar } from './telegram.js'
 
 const root = document.documentElement
-const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null
 
 const inTelegram = !!(tg && tg.platform && tg.platform !== 'unknown' && (tg.initData || tg.initDataUnsafe?.user))
 root.dataset.telegram = inTelegram ? '1' : '0'
@@ -20,10 +20,6 @@ try {
   root.dataset.theme = 'dark'
 }
 
-/**
- * contentSafeAreaInset.top — полный отступ сверху: системный статус-бар
- * вместе с шапкой Telegram. Ничего не вычитаем и не прибавляем env() сверху.
- */
 function applyInsets() {
   if (!inTelegram) {
     root.style.removeProperty('--tg-top')
@@ -53,6 +49,8 @@ if (tg) {
 
 window.addEventListener('resize', applyInsets)
 window.addEventListener('orientationchange', applyInsets)
+
+setBottomBar(root.dataset.theme === 'light' ? '#eaedf5' : '#0a0c12')
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

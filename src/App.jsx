@@ -7,6 +7,14 @@ import {
   readStartParam, routeFromParam, readRoute, writeRoute,
   paramForAlbum, directLink, webLink, getLinkConfig, copyText,
 } from './deeplink.js'
+import {
+  tg, capabilities, setBottomBar, setClosingConfirmation, hideKeyboard,
+  hapticNotify, isFullscreen, toggleFullscreen, onFullscreenChange,
+  homeScreenStatus, addToHomeScreen, onHomeScreenAdded,
+  shareToStory, downloadFile, openExternal, showSettingsButton,
+  setMainButton, setSecondaryButton, onMainButton, onSecondaryButton,
+} from './telegram.js'
+import * as sync from './sync.js'
 
 const UPLOADER_EMAILS = ['nenormalizm@gmail.com', 'nenormalizmlab@gmail.com', 'sobrio21@yandex.ru']
 
@@ -111,6 +119,9 @@ function pluralReleases(n) {
   if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return 'релиза'
   return 'релизов'
 }
+function safeFileName(s) {
+  return String(s || 'track').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'track'
+}
 
 function buildTracks(data, identifier) {
   const files = Array.isArray(data?.files) ? data.files : []
@@ -124,10 +135,12 @@ function buildTracks(data, identifier) {
     if (prev && prev.rank <= rank) continue
     const parts = f.name.split('/')
     const base = parts[parts.length - 1]
+    const ext = (base.match(/\.[^/.]+$/) || ['.mp3'])[0]
     map.set(dedupeKey, {
       key: `${identifier}/${f.name}`,
       name: f.name,
       title: base.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim(),
+      ext,
       url: `https://archive.org/download/${identifier}/${f.name.split('/').map(encodeURIComponent).join('/')}`,
       duration: parseLength(f.length),
       format: f.format,
@@ -169,6 +182,12 @@ const ITrash = (p) => <Ico {...p} d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 
 const IUp = (p) => <Ico {...p} d="M12 19V5M5 12l7-7 7 7" />
 const IChart = (p) => <Ico {...p} d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
 const ILink = (p) => <Ico {...p} d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" />
+const IExpand = (p) => <Ico {...p} d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" />
+const ICollapse = (p) => <Ico {...p} d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5" />
+const IHome = (p) => <Ico {...p} d="M4 11l8-7 8 7M6 10v10h12V10M10 20v-6h4v6" />
+const IStory = (p) => <Ico {...p}><rect x="3.5" y="3.5" width="17" height="17" rx="5" {...S} strokeDasharray="4 3" /><path d="M12 8.5v7M8.5 12h7" {...S} /></Ico>
+const IDownload = (p) => <Ico {...p} d="M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 20h14" />
+const ICloud = (p) => <Ico {...p} d="M7 18h10a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 6.6 11A3.5 3.5 0 0 0 7 18Z" />
 
 function Cover({ src, alt, className, seed, style }) {
   const [failed, setFailed] = useState(false)
@@ -199,8 +218,8 @@ function Skeletons({ n = 12 }) {
 }
 
 export default function App() {
-  const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : null
   const isPhone = useMedia('(max-width: 640px)')
+  const [caps] = useState(() => capabilities())
 
   const initialPrefs = readLS(K.prefs, {})
   const [theme, setTheme] = useState(initialPrefs.theme || document.documentElement.dataset.theme || 'dark')
@@ -221,6 +240,9 @@ export default function App() {
   const [favs, setFavs] = useState(() => new Set(readLS(K.favs, [])))
   const [hidden, setHidden] = useState(() => new Set(readLS(K.hidden, [])))
   const [radioRequested, setRadioRequested] = useState(false)
+  const [cloudReady, setCloudReady] = useState(!sync.enabled)
+  const [fullscreen, setFullscreen] = useState(() => isFullscreen())
+  const [homeStatus, setHomeStatus] = useState('unknown')
 
   const [route, setRoute] = useState(() => readRoute())
   const [viewAlbum, setViewAlbum] = useState(null)
@@ -243,6 +265,7 @@ export default function App() {
   const [resume, setResume] = useState(null)
   const [toasts, setToasts] = useState([])
   const [dragOver, setDragOver] = useState(null)
+  const [downloading, setDownloading] = useState(false)
 
   const audioRef = useRef(null)
   const playerRef = useRef(null)
@@ -260,6 +283,9 @@ export default function App() {
   const listenTick = useRef(null)
   const countedPlay = useRef(null)
   const searchTimer = useRef(null)
+  const hydrating = useRef(true)
+  const mainAction = useRef({ play: null, shuffle: null })
+  const lastSessionPush = useRef(0)
 
   const current = qIndex >= 0 && qIndex < queue.length ? queue[qIndex] : null
   const view = route.name === 'album' ? 'album' : route.name === 'stats' ? 'stats' : route.name === 'links' ? 'links' : 'library'
@@ -271,10 +297,56 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 7000 : 4200)
   }, [])
 
-  const haptic = useCallback((kind = 'light') => { try { tg?.HapticFeedback?.impactOccurred(kind) } catch {} }, [tg])
+  const haptic = useCallback((kind = 'light') => { try { tg?.HapticFeedback?.impactOccurred(kind) } catch {} }, [])
 
   useEffect(() => { analytics.init({ theme }) }, [])
 
+  /* ---------- облачная синхронизация ---------- */
+  useEffect(() => {
+    if (!sync.enabled) { hydrating.current = false; return }
+    let alive = true
+    ;(async () => {
+      const pulled = await sync.pull()
+      if (!alive) return
+      const p = pulled.prefs?.d
+      if (p && typeof p === 'object') {
+        if (p.theme) setTheme(p.theme)
+        if (p.sort) setSort(p.sort)
+        if (p.density) setDensity(p.density)
+        if (p.era) setEra(p.era)
+        if (typeof p.favOnly === 'boolean') setFavOnly(p.favOnly)
+        if (typeof p.volume === 'number') setVolume(p.volume)
+        if (typeof p.muted === 'boolean') setMuted(p.muted)
+        if (typeof p.shuffle === 'boolean') setShuffle(p.shuffle)
+        if (p.repeat) setRepeat(p.repeat)
+        writeLS(K.prefs, p)
+        sync.markPulled('prefs', pulled.prefs.ts)
+      }
+      if (Array.isArray(pulled.favs?.d)) {
+        setFavs(new Set(pulled.favs.d))
+        writeLS(K.favs, pulled.favs.d)
+        sync.markPulled('favs', pulled.favs.ts)
+      }
+      if (Array.isArray(pulled.hidden?.d)) {
+        setHidden(new Set(pulled.hidden.d))
+        writeLS(K.hidden, pulled.hidden.d)
+        sync.markPulled('hidden', pulled.hidden.ts)
+      }
+      if (pulled.session?.d) {
+        writeLS(K.session, pulled.session.d)
+        sync.markPulled('session', pulled.session.ts)
+      }
+      hydrating.current = false
+      setCloudReady(true)
+      if (Object.keys(pulled).length) toast('Настройки и избранное загружены из Telegram', 'success')
+    })()
+    const flush = () => { sync.flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
+    return () => { alive = false; window.removeEventListener('pagehide', flush) }
+  }, [toast])
+
+  /* ---------- оформление и нативные кнопки ---------- */
   useEffect(() => {
     const rs = document.documentElement.style
     const el = playerRef.current
@@ -300,10 +372,12 @@ export default function App() {
       window.removeEventListener('orientationchange', measure)
       timers.forEach(clearTimeout)
     }
-  }, [showPlayer, isPhone])
+  }, [showPlayer, isPhone, fullscreen])
 
   useEffect(() => {
-    writeLS(K.prefs, { theme, sort, density, era, favOnly, volume, muted, shuffle, repeat })
+    const prefs = { theme, sort, density, era, favOnly, volume, muted, shuffle, repeat }
+    writeLS(K.prefs, prefs)
+    if (!hydrating.current) sync.push('prefs', prefs)
   }, [theme, sort, density, era, favOnly, volume, muted, shuffle, repeat])
 
   useEffect(() => {
@@ -313,10 +387,57 @@ export default function App() {
     try { tg?.setHeaderColor?.(bg); tg?.setBackgroundColor?.(bg) } catch {}
     const meta = document.querySelector('meta[name="theme-color"]')
     if (meta) meta.setAttribute('content', bg)
-  }, [theme, tg])
+  }, [theme])
 
-  useEffect(() => { writeLS(K.favs, [...favs]) }, [favs])
-  useEffect(() => { writeLS(K.hidden, [...hidden]) }, [hidden])
+  useEffect(() => {
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+    const bar = showPlayer ? (theme === 'light' ? '#eaedf5' : '#0a0c12') : bg
+    setBottomBar(bar)
+  }, [showPlayer, theme])
+
+  useEffect(() => { setClosingConfirmation(isPlaying) }, [isPlaying])
+
+  useEffect(() => {
+    const list = [...favs]
+    writeLS(K.favs, list)
+    if (!hydrating.current) sync.push('favs', list)
+  }, [favs])
+
+  useEffect(() => {
+    const list = [...hidden]
+    writeLS(K.hidden, list)
+    if (!hydrating.current) sync.push('hidden', list)
+  }, [hidden])
+
+  useEffect(() => {
+    const off = onFullscreenChange(() => setFullscreen(isFullscreen()))
+    return off
+  }, [])
+
+  useEffect(() => {
+    if (!caps.homeScreen) return
+    let alive = true
+    homeScreenStatus().then((s) => { if (alive) setHomeStatus(s) })
+    const off = onHomeScreenAdded(() => setHomeStatus('added'))
+    return () => { alive = false; off() }
+  }, [caps.homeScreen])
+
+  useEffect(() => {
+    showSettingsButton(true)
+    return () => showSettingsButton(false)
+  }, [])
+
+  useEffect(() => {
+    const visible = view === 'album' && !!viewAlbum && !showPlayer && !albumLoading
+    setMainButton({ text: 'Слушать релиз', visible })
+    setSecondaryButton({ text: 'Вперемешку', visible: visible && caps.secondary, color: theme === 'light' ? '#eceff7' : '#1b2030', textColor: theme === 'light' ? '#0c1020' : '#eef1f8' })
+  }, [view, viewAlbum, showPlayer, albumLoading, caps.secondary, theme])
+
+  useEffect(() => {
+    const offMain = onMainButton(() => mainAction.current.play?.())
+    const offSecondary = onSecondaryButton(() => mainAction.current.shuffle?.())
+    return () => { offMain(); offSecondary() }
+  }, [])
 
   const loadLibrary = useCallback(async () => {
     setLibLoading(true); setLibError('')
@@ -431,16 +552,16 @@ export default function App() {
     if (initial.action === 'radio') setRadioRequested(true)
     if (initial.name === 'album' && initial.id) openAlbumView(initial.id)
 
-    const sync = () => {
+    const syncRoute = () => {
       const next = readRoute()
       const st = window.history.state
       depth.current = typeof st?.depth === 'number' ? st.depth : 0
       if (next.name === routeRef.current.name && next.id === routeRef.current.id) return
       applyRoute(next)
     }
-    window.addEventListener('popstate', sync)
-    window.addEventListener('hashchange', sync)
-    return () => { window.removeEventListener('popstate', sync); window.removeEventListener('hashchange', sync) }
+    window.addEventListener('popstate', syncRoute)
+    window.addEventListener('hashchange', syncRoute)
+    return () => { window.removeEventListener('popstate', syncRoute); window.removeEventListener('hashchange', syncRoute) }
   }, [applyRoute, openAlbumView])
 
   useEffect(() => {
@@ -452,7 +573,7 @@ export default function App() {
       bb.onClick(handler)
     } catch {}
     return () => { try { bb.offClick(handler) } catch {} }
-  }, [tg, view, queueOpen, goBack])
+  }, [view, queueOpen, goBack])
 
   const visibleAlbums = useMemo(() => albums.filter((a) => !hidden.has(a.identifier)), [albums, hidden])
 
@@ -551,6 +672,11 @@ export default function App() {
     startRadio()
   }, [radioRequested, visibleAlbums, startRadio])
 
+  mainAction.current = {
+    play: viewAlbum ? () => startAlbum(viewAlbum, viewTracks, null, false) : null,
+    shuffle: viewAlbum ? () => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) } : null,
+  }
+
   const nextAlbumAuto = useCallback(async (dir = 1) => {
     const pool = visibleAlbums
     if (!pool.length || !playerAlbum) { wantPlay.current = false; setBuffering(false); return }
@@ -636,7 +762,7 @@ export default function App() {
     setFavs((f) => {
       const n = new Set(f)
       if (n.has(id)) { n.delete(id); analytics.event('fav_remove', { album: id }) }
-      else { n.add(id); analytics.event('fav_add', { album: id }) }
+      else { n.add(id); analytics.event('fav_add', { album: id }); hapticNotify('success') }
       return n
     })
     haptic()
@@ -675,20 +801,45 @@ export default function App() {
     setShuffle(false)
   }, [baseTracks, current])
 
-  const shareAlbum = useCallback(async (album) => {
-    if (!album) return
+  const albumLink = useCallback((album) => {
     const param = paramForAlbum(album.identifier)
     const cfg = getLinkConfig()
-    const tgLink = cfg.bot && param ? directLink({ bot: cfg.bot, app: cfg.app, param, compact: cfg.compact }) : ''
-    const link = tgLink || webLink(param)
+    return (cfg.bot && param ? directLink({ bot: cfg.bot, app: cfg.app, param, compact: cfg.compact }) : '') || webLink(param)
+  }, [])
+
+  const shareAlbum = useCallback(async (album) => {
+    if (!album) return
+    const link = albumLink(album)
     const ok = await copyText(link)
-    if (ok) {
-      toast(tgLink ? 'Прямая ссылка на релиз скопирована' : 'Веб-ссылка скопирована. Username бота задаётся в разделе «Ссылки»', 'success',
-        tgLink ? null : { label: 'Открыть «Ссылки»', run: () => navigate({ name: 'links', id: null }) })
-    } else {
-      toast('Не удалось скопировать ссылку', 'error')
-    }
-  }, [toast, navigate])
+    if (ok) toast('Ссылка на релиз скопирована', 'success')
+    else toast('Не удалось скопировать ссылку', 'error')
+  }, [albumLink, toast])
+
+  const shareStory = useCallback((album) => {
+    if (!album) return
+    const ok = shareToStory(album.cover, {
+      text: `${stripCatalog(album.title)} — Nenormalizm Recs`,
+      url: albumLink(album),
+      name: 'Слушать',
+    })
+    if (!ok) toast('Истории недоступны в этом клиенте Telegram', 'warn')
+  }, [albumLink, toast])
+
+  const downloadTrack = useCallback(async (album) => {
+    const t = (current && playerAlbum?.identifier === album?.identifier) ? current : album?.tracks?.[0]
+    if (!t) { toast('Нет трека для загрузки', 'warn'); return }
+    setDownloading(true)
+    const res = await downloadFile(t.url, `${safeFileName(t.title)}${t.ext || '.mp3'}`)
+    setDownloading(false)
+    if (res.ok) { toast('Трек отправлен в загрузки Telegram', 'success'); hapticNotify('success') }
+    else if (res.reason === 'cancelled') toast('Загрузка отменена', 'info')
+    else toast('Загрузка недоступна в этом клиенте', 'warn')
+  }, [current, playerAlbum, toast])
+
+  const addHome = useCallback(async () => {
+    if (!addToHomeScreen()) { toast('Добавление на экран недоступно', 'warn'); return }
+    setTimeout(async () => setHomeStatus(await homeScreenStatus()), 1200)
+  }, [toast])
 
   useEffect(() => { const a = audioRef.current; if (a) a.volume = muted ? 0 : volume }, [volume, muted, current])
   useEffect(() => { setCurrentTime(0); setBuffered(0); setDuration(current?.duration || 0); listenTick.current = null }, [current?.key])
@@ -753,15 +904,27 @@ export default function App() {
   useEffect(() => {
     const save = () => {
       if (!current || !playerAlbum) return
-      writeLS(K.session, { albumId: playerAlbum.identifier, trackKey: current.key, time: audioRef.current?.currentTime || 0, shuffle, repeat, ts: Date.now() })
+      const payload = { albumId: playerAlbum.identifier, trackKey: current.key, time: audioRef.current?.currentTime || 0, shuffle, repeat, ts: Date.now() }
+      writeLS(K.session, payload)
+      if (!hydrating.current && Date.now() - lastSessionPush.current > 25000) {
+        lastSessionPush.current = Date.now()
+        sync.push('session', payload, { delay: 1200 })
+      }
+    }
+    const final = () => {
+      if (!current || !playerAlbum) return
+      const payload = { albumId: playerAlbum.identifier, trackKey: current.key, time: audioRef.current?.currentTime || 0, shuffle, repeat, ts: Date.now() }
+      writeLS(K.session, payload)
+      if (!hydrating.current) sync.push('session', payload, { delay: 0 })
+      sync.flush()
     }
     const id = setInterval(save, 5000)
-    window.addEventListener('pagehide', save)
-    return () => { clearInterval(id); window.removeEventListener('pagehide', save); save() }
+    window.addEventListener('pagehide', final)
+    return () => { clearInterval(id); window.removeEventListener('pagehide', final); final() }
   }, [current, playerAlbum, shuffle, repeat])
 
   useEffect(() => {
-    if (restored.current) return
+    if (restored.current || !cloudReady) return
     if (routeRef.current.name === 'album') return
     const s = readLS(K.session, null)
     if (!s?.albumId || !s?.trackKey) return
@@ -783,7 +946,7 @@ export default function App() {
       setDuration(dur)
       if (startTime > 5) setResume({ time: startTime })
     }).catch(() => {})
-  }, [fetchAlbum])
+  }, [fetchAlbum, cloudReady])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -791,7 +954,7 @@ export default function App() {
       const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       if (e.key === 'Escape') {
         if (queueOpen) { setQueueOpen(false); e.preventDefault(); return }
-        if (typing) { t.blur(); return }
+        if (typing) { t.blur(); hideKeyboard(); return }
         if (view !== 'library') { goBack(); e.preventDefault() }
         return
       }
@@ -808,12 +971,13 @@ export default function App() {
         case 'q': case 'Q': case 'й': setQueueOpen((o) => !o); break
         case 'n': case 'N': case 'т': playNext(); break
         case 'p': case 'P': case 'з': playPrev(); break
+        case 'f': case 'F': case 'а': if (caps.fullscreen) { toggleFullscreen(); setFullscreen(isFullscreen()) } break
         default: break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, toggleShuffle, cycleRepeat, playNext, playPrev, goBack, view, queueOpen, current, duration])
+  }, [togglePlay, toggleShuffle, cycleRepeat, playNext, playPrev, goBack, view, queueOpen, current, duration, caps.fullscreen])
 
   const goToPlaying = useCallback(() => {
     if (!playerAlbum) return
@@ -871,7 +1035,14 @@ export default function App() {
 
                 <div className="search tb-search">
                   <ISearch size={16} />
-                  <input type="search" value={query} onChange={(e) => onSearch(e.target.value)} placeholder="Поиск: релиз, артист, каталог…" aria-label="Поиск по каталогу" />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => onSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur(); hideKeyboard() } }}
+                    placeholder="Поиск: релиз, артист, каталог…"
+                    aria-label="Поиск по каталогу"
+                  />
                   {query && <button className="search-clear" onClick={() => setQuery('')} aria-label="Очистить поиск"><IClose size={15} /></button>}
                 </div>
 
@@ -920,6 +1091,7 @@ export default function App() {
               <div className="stats">
                 <b>{filtered.length}</b><span>{pluralReleases(filtered.length)}</span>
                 <span className="sep">/</span><span>{visibleAlbums.length} в архиве</span>
+                {sync.enabled && <><span className="sep">/</span><span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><ICloud size={13} /> синхронизация</span></>}
                 {filtersActive && (
                   <>
                     <span className="sep">/</span>
@@ -992,8 +1164,18 @@ export default function App() {
 
               <div className="album-foot" style={{ paddingTop: 22, paddingBottom: 6 }}>
                 <IDisc size={14} />
-                <span>Архив лейбла · archive.org</span>
-                <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: 'auto' }} onClick={() => navigate({ name: 'links', id: null })}>
+                <span>Архив лейбла</span>
+                {caps.homeScreen && homeStatus !== 'added' && homeStatus !== 'unsupported' && (
+                  <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: 'auto' }} onClick={addHome}>
+                    <IHome size={14} /> На экран телефона
+                  </button>
+                )}
+                {caps.fullscreen && (
+                  <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: caps.homeScreen && homeStatus !== 'added' ? 0 : 'auto' }} onClick={() => { toggleFullscreen(); setFullscreen(isFullscreen()) }}>
+                    {fullscreen ? <><ICollapse size={14} /> Обычный режим</> : <><IExpand size={14} /> Полный экран</>}
+                  </button>
+                )}
+                <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'links', id: null })}>
                   <ILink size={14} /> Ссылки
                 </button>
                 <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'stats', id: null })}>
@@ -1013,7 +1195,7 @@ export default function App() {
                 <span className="crumb">Библиотека / {viewAlbum ? catalogOf(viewAlbum) : route.id}</span>
                 <div className="bar-actions">
                   {viewAlbum && (
-                    <button className="icon-btn" onClick={() => shareAlbum(viewAlbum)} aria-label="Поделиться релизом" title="Поделиться релизом">
+                    <button className="icon-btn" onClick={() => shareAlbum(viewAlbum)} aria-label="Скопировать ссылку на релиз" title="Скопировать ссылку">
                       <ILink size={17} />
                     </button>
                   )}
@@ -1076,7 +1258,12 @@ export default function App() {
                       <div className="hero-actions">
                         <button className="btn btn-primary" onClick={() => startAlbum(viewAlbum, viewTracks, null, false)}><IPlay size={15} /> Слушать релиз</button>
                         <button className="btn btn-ghost" onClick={() => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) }}><IShuffle size={15} /> Вперемешку</button>
-                        <button className="btn btn-ghost" onClick={() => shareAlbum(viewAlbum)}><ILink size={15} /> Поделиться</button>
+                        {caps.story && <button className="btn btn-ghost" onClick={() => shareStory(viewAlbum)}><IStory size={15} /> В историю</button>}
+                        {caps.download && (
+                          <button className="btn btn-ghost" onClick={() => downloadTrack(viewAlbum)} disabled={downloading}>
+                            <IDownload size={15} /> {downloading ? 'Готовим…' : 'Скачать трек'}
+                          </button>
+                        )}
                       </div>
                       {viewAlbum.description && (
                         <div className="desc">
@@ -1118,7 +1305,13 @@ export default function App() {
 
                   <div className="album-foot">
                     <IDisc size={14} /><span>Источник:</span>
-                    <a href={`https://archive.org/details/${encodeURIComponent(viewAlbum.identifier)}`} target="_blank" rel="noreferrer noopener">archive.org/details/{viewAlbum.identifier}</a>
+                    <button
+                      className="btn btn-quiet"
+                      style={{ height: 30, padding: '0 8px', fontSize: 12 }}
+                      onClick={() => openExternal(`https://archive.org/details/${encodeURIComponent(viewAlbum.identifier)}`, true)}
+                    >
+                      archive.org/details/{viewAlbum.identifier}
+                    </button>
                   </div>
                 </div>
               </>
