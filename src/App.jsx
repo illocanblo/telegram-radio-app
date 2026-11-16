@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 
 /* ============================================================
-   ИСТОЧНИКИ (только для запроса; в интерфейсе не раскрываются)
+   ИСТОЧНИКИ — только для запроса, в интерфейсе не раскрываются
    ============================================================ */
 const UPLOADER_EMAILS = [
   'nenormalizm@gmail.com',
@@ -108,6 +108,18 @@ function yearOf(album) {
 function decadeOf(album) {
   const y = parseInt(yearOf(album), 10)
   return y ? Math.floor(y / 10) * 10 : null
+}
+function pluralTracks(n) {
+  const d = n % 10, h = n % 100
+  if (d === 1 && h !== 11) return 'трек'
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return 'трека'
+  return 'треков'
+}
+function pluralReleases(n) {
+  const d = n % 10, h = n % 100
+  if (d === 1 && h !== 11) return 'релиз'
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return 'релиза'
+  return 'релизов'
 }
 
 function buildTracks(data, identifier) {
@@ -263,18 +275,20 @@ export default function App() {
   const [queueOpen, setQueueOpen] = useState(false)
   const [resume, setResume] = useState(null)
   const [toasts, setToasts] = useState([])
+  const [dragOver, setDragOver] = useState(null)
 
   const audioRef = useRef(null)
   const playerRef = useRef(null)
+  const seekRef = useRef(null)
   const wantPlay = useRef(false)
   const pendingSeek = useRef(null)
   const metaCache = useRef(new Map())
   const routeRef = useRef(route)
+  const viewAlbumIdRef = useRef(null)
+  const navigateRef = useRef(null)
   const depth = useRef(0)
   const restored = useRef(false)
   const dragFrom = useRef(null)
-  const [dragOver, setDragOver] = useState(null)
-  const seekRef = useRef(null)
   const scrubbing = useRef(false)
 
   const current = qIndex >= 0 && qIndex < queue.length ? queue[qIndex] : null
@@ -286,23 +300,24 @@ export default function App() {
     setToasts((t) => [...t.slice(-3), { id, msg, tone, action }])
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 7000 : 4200)
   }, [])
+
   const haptic = useCallback((kind = 'light') => {
     try { tg?.HapticFeedback?.impactOccurred(kind) } catch {}
   }, [tg])
 
   /* ---------- реальная высота плеера резервируется под контентом ---------- */
   useEffect(() => {
-    const rootStyle = document.documentElement.style
+    const rs = document.documentElement.style
     const el = playerRef.current
     if (!el) {
-      rootStyle.setProperty('--player-h', '0px')
-      rootStyle.setProperty('--bottom-gap', 'calc(var(--app-bottom) + 24px)')
+      rs.setProperty('--player-h', '0px')
+      rs.setProperty('--bottom-gap', 'calc(var(--app-bottom) + 24px)')
       return
     }
-    rootStyle.setProperty('--bottom-gap', '24px')
+    rs.setProperty('--bottom-gap', '24px')
     const measure = () => {
       const h = Math.ceil(el.getBoundingClientRect().height)
-      if (h > 0) rootStyle.setProperty('--player-h', `${h}px`)
+      if (h > 0) rs.setProperty('--player-h', `${h}px`)
     }
     measure()
     let ro = null
@@ -312,16 +327,17 @@ export default function App() {
     }
     window.addEventListener('resize', measure)
     window.addEventListener('orientationchange', measure)
-    const t = setTimeout(measure, 320)
+    const t1 = setTimeout(measure, 120)
+    const t2 = setTimeout(measure, 420)
     return () => {
       if (ro) ro.disconnect()
       window.removeEventListener('resize', measure)
       window.removeEventListener('orientationchange', measure)
-      clearTimeout(t)
+      clearTimeout(t1); clearTimeout(t2)
     }
   }, [showPlayer])
 
-  /* ---------- настройки ---------- */
+  /* ---------- настройки и тема ---------- */
   useEffect(() => {
     writeLS(K.prefs, { theme, sort, density, era, favOnly, volume, muted, shuffle, repeat })
   }, [theme, sort, density, era, favOnly, volume, muted, shuffle, repeat])
@@ -395,31 +411,33 @@ export default function App() {
     try {
       const built = await fetchAlbum(id)
       if (!built.tracks.length) {
+        viewAlbumIdRef.current = null
         setHidden((h) => new Set([...h, id]))
         toast(`«${stripCatalog(built.title)}» без аудиофайлов — скрыт из каталога`, 'warn', {
           label: 'Вернуть',
           run: () => setHidden((h) => { const n = new Set(h); n.delete(id); return n }),
         })
-        navigate({ name: 'library', id: null }, { replace: true })
+        navigateRef.current?.({ name: 'library', id: null }, { replace: true })
         return
       }
+      viewAlbumIdRef.current = id
       setViewAlbum(built)
       setViewTracks(built.tracks)
     } catch (e) {
+      viewAlbumIdRef.current = null
       setAlbumError(e?.message || 'Не удалось загрузить релиз')
     } finally {
       setAlbumLoading(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchAlbum, toast])
 
-  /* ---------- History API ---------- */
+  /* ---------- History API: «назад» браузера работает без перезагрузки ---------- */
   const applyRoute = useCallback((next) => {
     routeRef.current = next
     setRoute(next)
-    if (next.name === 'album' && viewAlbum?.identifier !== next.id) openAlbumView(next.id)
+    if (next.name === 'album' && viewAlbumIdRef.current !== next.id) openAlbumView(next.id)
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  }, [openAlbumView, viewAlbum])
+  }, [openAlbumView])
 
   const navigate = useCallback((next, { replace = false } = {}) => {
     const url = hashFor(next)
@@ -431,6 +449,8 @@ export default function App() {
     }
     applyRoute(next)
   }, [applyRoute])
+
+  navigateRef.current = navigate
 
   const goBack = useCallback(() => {
     if (queueOpen) { setQueueOpen(false); return }
@@ -465,9 +485,9 @@ export default function App() {
       window.removeEventListener('popstate', sync)
       window.removeEventListener('hashchange', sync)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [applyRoute, openAlbumView])
 
+  /* ---------- нативная кнопка «Назад» Telegram ---------- */
   useEffect(() => {
     const bb = tg?.BackButton
     if (!bb) return
@@ -517,8 +537,9 @@ export default function App() {
   }, [])
 
   const startAlbum = useCallback((album, tracks, startKey = null, forceShuffle = null) => {
+    if (!tracks?.length) return
     const useShuffle = forceShuffle === null ? shuffle : forceShuffle
-    let order = useShuffle ? shuffleArr(tracks) : [...tracks]
+    const order = useShuffle ? shuffleArr(tracks) : [...tracks]
     if (startKey) {
       const i = order.findIndex((t) => t.key === startKey)
       if (i > 0) { const [pick] = order.splice(i, 1); order.unshift(pick) }
@@ -526,7 +547,7 @@ export default function App() {
     setPlayerAlbum(album)
     setBaseTracks(tracks)
     setQueue(order)
-    setQIndex(order.length ? 0 : -1)
+    setQIndex(0)
     setCurrentTime(0)
     setBuffered(0)
     setDuration(order[0]?.duration || 0)
@@ -545,10 +566,10 @@ export default function App() {
   }, [viewAlbum, viewTracks, playerAlbum, queue, startAlbum, requestPlay, haptic])
 
   const playAlbum = useCallback((album, { shuffled = false } = {}) => {
-    const cachedMeta = metaCache.current.get(album.identifier)
-    if (cachedMeta?.tracks?.length) {
+    const hit = metaCache.current.get(album.identifier)
+    if (hit?.tracks?.length) {
       if (shuffled) setShuffle(true)
-      startAlbum(cachedMeta, cachedMeta.tracks, null, shuffled ? true : null)
+      startAlbum(hit, hit.tracks, null, shuffled ? true : null)
       return
     }
     fetchAlbum(album.identifier).then((built) => {
@@ -571,6 +592,7 @@ export default function App() {
     const pool = visibleAlbums
     if (!pool.length || !playerAlbum) { wantPlay.current = false; setBuffering(false); return }
     let idx = pool.findIndex((a) => a.identifier === playerAlbum.identifier)
+    if (idx < 0) idx = 0
     for (let step = 0; step < pool.length; step++) {
       idx = (idx + dir + pool.length) % pool.length
       try {
@@ -582,6 +604,7 @@ export default function App() {
           setQueue(order)
           setQIndex(0)
           setCurrentTime(0)
+          setBuffered(0)
           setDuration(order[0]?.duration || 0)
           requestPlay()
           return
@@ -625,13 +648,12 @@ export default function App() {
     setShuffle((s) => {
       const next = !s
       if (!queue.length) return next
+      const cur = current
       if (next) {
-        const cur = current
         const rest = queue.filter((t) => t.key !== cur?.key)
         const order = cur ? [cur, ...shuffleArr(rest)] : shuffleArr(queue)
         setQueue(order); setQIndex(cur ? 0 : qIndex)
       } else {
-        const cur = current
         setQueue(baseTracks)
         setQIndex(cur ? Math.max(0, baseTracks.findIndex((t) => t.key === cur.key)) : 0)
       }
@@ -678,6 +700,13 @@ export default function App() {
     setQueue(next)
     if (curKey) setQIndex(Math.max(0, next.findIndex((t) => t.key === curKey)))
   }, [queue, current])
+
+  const restoreOrder = useCallback(() => {
+    if (!baseTracks.length) return
+    setQueue(baseTracks)
+    setQIndex(Math.max(0, baseTracks.findIndex((t) => t.key === current?.key)))
+    setShuffle(false)
+  }, [baseTracks, current])
 
   /* ---------- аудио ---------- */
   useEffect(() => {
@@ -753,7 +782,7 @@ export default function App() {
     if (e.key === 'End') { a.currentTime = Math.max(0, duration - 1); e.preventDefault() }
   }
 
-  /* ---------- сессия ---------- */
+  /* ---------- сессия: возобновление после перезагрузки ---------- */
   useEffect(() => {
     const save = () => {
       if (!current || !playerAlbum) return
@@ -789,7 +818,7 @@ export default function App() {
       pendingSeek.current = s.time || 0
       setCurrentTime(s.time || 0)
       setDuration(finalOrder[0]?.duration || 0)
-      setResume({ time: s.time || 0, title: finalOrder[0]?.title || '' })
+      setResume({ time: s.time || 0 })
     }).catch(() => {})
   }, [fetchAlbum])
 
@@ -826,24 +855,29 @@ export default function App() {
 
   const goToPlaying = useCallback(() => {
     if (!playerAlbum) return
-    if (viewAlbum?.identifier !== playerAlbum.identifier) {
+    if (viewAlbumIdRef.current !== playerAlbum.identifier) {
+      viewAlbumIdRef.current = playerAlbum.identifier
       setViewAlbum(playerAlbum)
       setViewTracks(baseTracks)
+      setAlbumError('')
+      setDescOpen(false)
     }
     navigate({ name: 'album', id: playerAlbum.identifier })
-  }, [playerAlbum, viewAlbum, baseTracks, navigate])
+  }, [playerAlbum, baseTracks, navigate])
 
   /* ============================================================
    РЕНДЕР
    ============================================================ */
   const shownTime = scrub != null ? scrub : currentTime
   const totalView = viewTracks.reduce((s, t) => s + (t.duration || 0), 0)
+  const seekPct = duration ? Math.min(100, (shownTime / duration) * 100) : 0
 
   return (
     <>
       <div className="atmos" aria-hidden="true">
         <span className="blob b1" /><span className="blob b2" /><span className="blob b3" />
       </div>
+      <div className="top-shield" aria-hidden="true" />
 
       <div className="app">
         <audio
@@ -891,12 +925,16 @@ export default function App() {
                   <IPlay size={15} /> Радио
                 </button>
 
-                <button className="icon-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Сменить тему">
+                <button className="icon-btn" aria-pressed={density === 'list'} onClick={() => setDensity(density === 'grid' ? 'list' : 'grid')} aria-label="Плотность списка" title="Плитка / список">
+                  {density === 'grid' ? <IList size={17} /> : <IGrid size={17} />}
+                </button>
+
+                <button className="icon-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Сменить тему" title="Тема">
                   {theme === 'dark' ? <ISun size={17} /> : <IMoon size={17} />}
                 </button>
               </div>
 
-              <div className="wrap toolbar-in" style={{ paddingTop: 0 }}>
+              <div className="wrap toolbar-in second">
                 <div className="chips" role="group" aria-label="Фильтры">
                   <button className="chip fav" aria-pressed={favOnly} onClick={() => setFavOnly((v) => !v)}>
                     <IHeart size={13} filled={favOnly} /> Избранное{totalFavs > 0 ? ` · ${totalFavs}` : ''}
@@ -920,11 +958,7 @@ export default function App() {
                   <option value="artist">По артисту</option>
                 </select>
 
-                <button className="icon-btn" aria-pressed={density === 'list'} onClick={() => setDensity(density === 'grid' ? 'list' : 'grid')} aria-label="Плотность списка">
-                  {density === 'grid' ? <IList size={17} /> : <IGrid size={17} />}
-                </button>
-
-                <button className="icon-btn" onClick={loadLibrary} aria-label="Обновить каталог" disabled={libLoading}>
+                <button className="icon-btn lib-refresh" onClick={loadLibrary} aria-label="Обновить каталог" title="Обновить каталог" disabled={libLoading}>
                   <IRetry size={17} />
                 </button>
               </div>
@@ -933,7 +967,7 @@ export default function App() {
             <div className="wrap">
               <div className="stats">
                 <b>{filtered.length}</b>
-                <span>релизов</span>
+                <span>{pluralReleases(filtered.length)}</span>
                 <span className="sep">/</span>
                 <span>{visibleAlbums.length} в архиве</span>
                 {filtersActive && (
@@ -1039,7 +1073,7 @@ export default function App() {
                       aria-pressed={favs.has(viewAlbum.identifier)}
                       style={favs.has(viewAlbum.identifier) ? { color: 'var(--magenta)', borderColor: 'var(--magenta)' } : undefined}
                       onClick={() => toggleFav(viewAlbum.identifier)}
-                      aria-label="В избранное"
+                      aria-label={favs.has(viewAlbum.identifier) ? 'Убрать из избранного' : 'В избранное'}
                     >
                       <IHeart size={17} filled={favs.has(viewAlbum.identifier)} />
                     </button>
@@ -1086,7 +1120,7 @@ export default function App() {
                       {viewAlbum.creator && <div className="hero-artist">{viewAlbum.creator}</div>}
                       <div className="hero-meta">
                         {yearOf(viewAlbum) && <span className="tag accent">{yearOf(viewAlbum)}</span>}
-                        <span className="tag">{viewTracks.length} треков</span>
+                        <span className="tag">{viewTracks.length} {pluralTracks(viewTracks.length)}</span>
                         {totalView > 0 && <span className="tag">{fmtTime(totalView)}</span>}
                         {viewAlbum.subjects.map((s) => <span className="tag cyan" key={s}>{s}</span>)}
                       </div>
@@ -1179,9 +1213,7 @@ export default function App() {
             </div>
             <div className="queue-tools">
               <button className="chip" aria-pressed={shuffle} onClick={toggleShuffle}><IShuffle size={13} /> Перемешать</button>
-              <button className="chip" onClick={() => { setQueue(baseTracks); setQIndex(Math.max(0, baseTracks.findIndex((t) => t.key === current?.key))); setShuffle(false) }}>
-                <IRetry size={13} /> Исходный порядок
-              </button>
+              <button className="chip" onClick={restoreOrder} disabled={!baseTracks.length}><IRetry size={13} /> Исходный порядок</button>
             </div>
             <div className="queue-list">
               {!queue.length && <div className="queue-empty">Очередь пуста. Запустите релиз или включите радио.</div>}
@@ -1235,7 +1267,7 @@ export default function App() {
                   {buffering && !isPlaying ? <span className="spinner" /> : isPlaying ? <IPause size={19} /> : <IPlay size={19} />}
                 </button>
                 <button className="p-btn" onClick={playNext} aria-label="Следующий (N)" title="Следующий (N)"><INext size={19} /></button>
-                <button className={cx('p-btn', repeat !== 'off' && 'on')} onClick={cycleRepeat} aria-label={`Повтор: ${repeat}`} title="Повтор (R)">
+                <button className={cx('p-btn', repeat !== 'off' && 'on')} onClick={cycleRepeat} aria-label={`Повтор: ${repeat === 'off' ? 'выключен' : repeat === 'all' ? 'весь каталог' : 'релиз'}`} title="Повтор (R)">
                   <IRepeat size={17} />{repeat === 'album' && <span className="badge">1</span>}
                 </button>
               </div>
@@ -1259,9 +1291,9 @@ export default function App() {
                 >
                   <div className="seek-track">
                     <div className="seek-buf" style={{ width: `${buffered * 100}%` }} />
-                    <div className="seek-fill" style={{ width: `${duration ? (shownTime / duration) * 100 : 0}%` }} />
+                    <div className="seek-fill" style={{ width: `${seekPct}%` }} />
                   </div>
-                  <span className="seek-knob" style={{ left: `${duration ? (shownTime / duration) * 100 : 0}%` }} />
+                  <span className="seek-knob" style={{ left: `${seekPct}%` }} />
                 </div>
                 <span className="p-time right">{fmtTime(duration)}</span>
               </div>
@@ -1270,11 +1302,11 @@ export default function App() {
             <div className="p-right">
               {resume && !isPlaying && (
                 <button className="resume-chip" onClick={() => { pendingSeek.current = resume.time; requestPlay(); setResume(null) }}>
-                  <IPlay size={12} /> Продолжить {fmtTime(resume.time)}
+                  <IPlay size={12} /><span className="resume-word">Продолжить</span> {fmtTime(resume.time)}
                 </button>
               )}
               <div className="vol">
-                <button className="p-btn" onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Включить звук (M)' : 'Выключить звук (M)'} title="M">
+                <button className="p-btn" onClick={() => setMuted((m) => !m)} aria-pressed={muted} aria-label={muted ? 'Включить звук (M)' : 'Выключить звук (M)'} title="Звук (M)">
                   {muted || volume === 0 ? <IMute size={17} /> : <IVol size={17} />}
                 </button>
                 <input
