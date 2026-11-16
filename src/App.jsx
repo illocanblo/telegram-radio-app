@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import Logo from './Logo.jsx'
 
 /* ============================================================
    ИСТОЧНИКИ — только для запроса, в интерфейсе не раскрываются
@@ -15,6 +16,9 @@ const FORMAT_RANK = {
 const FORMAT_SHORT = {
   'VBR MP3': 'MP3', MP3: 'MP3', M4A: 'M4A', AAC: 'AAC', 'Ogg Vorbis': 'OGG', Opus: 'OPUS', FLAC: 'FLAC', Flac: 'FLAC', Shorten: 'SHN',
 }
+
+const PLATES = ['none', 'light', 'dark']
+const PLATE_LABEL = { none: 'Без подложки', light: 'Светлая подложка', dark: 'Тёмная подложка' }
 
 const K = {
   prefs: 'nr.prefs.v1',
@@ -191,8 +195,8 @@ const IInfo = (p) => <Ico {...p} d="M12 11v5M12 7.5v.01M12 3a9 9 0 1 0 0 18 9 9 
 const IDisc = (p) => <Ico {...p} d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
 const IGrip = (p) => <Ico {...p} d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
 const ITrash = (p) => <Ico {...p} d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
-const IRadio = (p) => <Ico {...p} d="M4 9h16v10H4zM8 9V5l9-2M8.5 14h.01M13 12.5a3 3 0 1 0 0 4" />
 const IUp = (p) => <Ico {...p} d="M12 19V5M5 12l7-7 7 7" />
+const IPlate = (p) => <Ico {...p}><rect x="3.5" y="3.5" width="17" height="17" rx="4" {...S} /><path d="M12 3.5v17" {...S} /><path d="M12 3.5h4.5a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4H12Z" fill="currentColor" /></Ico>
 
 /* ============================================================
    КОМПОНЕНТЫ
@@ -242,6 +246,7 @@ export default function App() {
   const [density, setDensity] = useState(initialPrefs.density || 'grid')
   const [era, setEra] = useState(initialPrefs.era || 'all')
   const [favOnly, setFavOnly] = useState(!!initialPrefs.favOnly)
+  const [logoPlate, setLogoPlate] = useState(PLATES.includes(initialPrefs.logoPlate) ? initialPrefs.logoPlate : 'none')
   const [query, setQuery] = useState('')
   const [volume, setVolume] = useState(typeof initialPrefs.volume === 'number' ? initialPrefs.volume : 0.85)
   const [muted, setMuted] = useState(!!initialPrefs.muted)
@@ -339,8 +344,8 @@ export default function App() {
 
   /* ---------- настройки и тема ---------- */
   useEffect(() => {
-    writeLS(K.prefs, { theme, sort, density, era, favOnly, volume, muted, shuffle, repeat })
-  }, [theme, sort, density, era, favOnly, volume, muted, shuffle, repeat])
+    writeLS(K.prefs, { theme, sort, density, era, favOnly, logoPlate, volume, muted, shuffle, repeat })
+  }, [theme, sort, density, era, favOnly, logoPlate, volume, muted, shuffle, repeat])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -431,7 +436,7 @@ export default function App() {
     }
   }, [fetchAlbum, toast])
 
-  /* ---------- History API: «назад» браузера работает без перезагрузки ---------- */
+  /* ---------- History API ---------- */
   const applyRoute = useCallback((next) => {
     routeRef.current = next
     setRoute(next)
@@ -457,6 +462,11 @@ export default function App() {
     if (depth.current > 0) window.history.back()
     else navigate({ name: 'library', id: null }, { replace: true })
   }, [navigate, queueOpen])
+
+  const goHome = useCallback(() => {
+    if (routeRef.current.name === 'album') goBack()
+    else window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [goBack])
 
   useEffect(() => {
     const initial = parseHash()
@@ -487,7 +497,6 @@ export default function App() {
     }
   }, [applyRoute, openAlbumView])
 
-  /* ---------- нативная кнопка «Назад» Telegram ---------- */
   useEffect(() => {
     const bb = tg?.BackButton
     if (!bb) return
@@ -527,6 +536,11 @@ export default function App() {
   const totalFavs = useMemo(() => visibleAlbums.filter((a) => favs.has(a.identifier)).length, [visibleAlbums, favs])
   const resetFilters = useCallback(() => { setFavOnly(false); setEra('all'); setQuery('') }, [])
   const filtersActive = favOnly || era !== 'all' || query.trim() !== ''
+
+  const cyclePlate = useCallback(() => {
+    setLogoPlate((p) => PLATES[(PLATES.indexOf(p) + 1) % PLATES.length])
+    haptic()
+  }, [haptic])
 
   /* ---------- воспроизведение ---------- */
   const requestPlay = useCallback(() => {
@@ -782,7 +796,7 @@ export default function App() {
     if (e.key === 'End') { a.currentTime = Math.max(0, duration - 1); e.preventDefault() }
   }
 
-  /* ---------- сессия: возобновление после перезагрузки ---------- */
+  /* ---------- сессия ---------- */
   useEffect(() => {
     const save = () => {
       if (!current || !playerAlbum) return
@@ -896,18 +910,18 @@ export default function App() {
           onError={onAudioError}
         />
 
-        {/* ================= БИБЛИОТЕКА ================= */}
+        {/* ================= ГЛАВНАЯ: КАТАЛОГ ================= */}
         {view === 'library' && (
           <>
             <div className="toolbar">
               <div className="wrap toolbar-in">
-                <div className="brand">
-                  <span className="brand-mark"><IRadio size={19} /></span>
+                <button className="brand" onClick={goHome} aria-label="Nenormalizm Recs — в начало каталога">
+                  <Logo h={46} playing={isPlaying} plate={logoPlate} />
                   <span className="brand-text">
                     <b>Nenormalizm Recs</b>
                     <span>archive radio</span>
                   </span>
-                </div>
+                </button>
 
                 <div className="search">
                   <ISearch size={16} />
@@ -923,6 +937,16 @@ export default function App() {
 
                 <button className="btn btn-primary" onClick={startRadio} disabled={!visibleAlbums.length}>
                   <IPlay size={15} /> Радио
+                </button>
+
+                <button
+                  className="icon-btn"
+                  onClick={cyclePlate}
+                  aria-pressed={logoPlate !== 'none'}
+                  aria-label={`Подложка логотипа: ${PLATE_LABEL[logoPlate]}`}
+                  title={`Подложка логотипа: ${PLATE_LABEL[logoPlate]}`}
+                >
+                  <IPlate size={17} />
                 </button>
 
                 <button className="icon-btn" aria-pressed={density === 'list'} onClick={() => setDensity(density === 'grid' ? 'list' : 'grid')} aria-label="Плотность списка" title="Плитка / список">
@@ -965,6 +989,16 @@ export default function App() {
             </div>
 
             <div className="wrap">
+              {libLoading && !albums.length && (
+                <div className="boot">
+                  <Logo h={84} playing plate={logoPlate} />
+                  <div className="boot-txt">
+                    <b>Настраиваем приём</b>
+                    <span>Читаем архив лейбла…</span>
+                  </div>
+                </div>
+              )}
+
               <div className="stats">
                 <b>{filtered.length}</b>
                 <span>{pluralReleases(filtered.length)}</span>
@@ -993,7 +1027,7 @@ export default function App() {
 
               {!libLoading && !libError && !filtered.length && (
                 <div className="state">
-                  <div className="state-icon"><IDisc size={24} /></div>
+                  <div className="state-mark"><Logo h={60} plate={logoPlate} /></div>
                   <h3>Ничего не найдено</h3>
                   <p>Под текущие фильтры не подходит ни один релиз. Сбросьте фильтры или измените поисковый запрос.</p>
                   <button className="btn btn-ghost" onClick={resetFilters}>Показать всё</button>
@@ -1065,6 +1099,9 @@ export default function App() {
             <div className="album-bar">
               <div className="wrap album-bar-in">
                 <button className="back-btn" onClick={goBack}><IBack size={17} /> Назад к каталогу</button>
+                <button className="bar-logo" onClick={goHome} aria-label="В каталог">
+                  <Logo h={28} playing={isPlaying} plate={logoPlate} />
+                </button>
                 <span className="crumb">Библиотека / {viewAlbum ? catalogOf(viewAlbum) : route.id}</span>
                 <div className="bar-actions">
                   {viewAlbum && (
