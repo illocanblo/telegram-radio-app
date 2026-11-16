@@ -21,6 +21,23 @@ function writeLS(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
 }
 
+function useMedia(query) {
+  const [match, setMatch] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query).matches : false))
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mq = window.matchMedia(query)
+    const on = () => setMatch(mq.matches)
+    on()
+    if (mq.addEventListener) mq.addEventListener('change', on)
+    else mq.addListener(on)
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', on)
+      else mq.removeListener(on)
+    }
+  }, [query])
+  return match
+}
+
 function fmtTime(sec) {
   if (!Number.isFinite(sec) || sec < 0) return '0:00'
   const s = Math.floor(sec % 60), m = Math.floor(sec / 60) % 60, h = Math.floor(sec / 3600)
@@ -186,6 +203,7 @@ function Skeletons({ n = 12 }) {
 
 export default function App() {
   const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : null
+  const isPhone = useMedia('(max-width: 640px)')
 
   const initialPrefs = readLS(K.prefs, {})
   const [theme, setTheme] = useState(initialPrefs.theme || document.documentElement.dataset.theme || 'dark')
@@ -272,14 +290,14 @@ export default function App() {
     if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(measure); ro.observe(el) }
     window.addEventListener('resize', measure)
     window.addEventListener('orientationchange', measure)
-    const timers = [setTimeout(measure, 60), setTimeout(measure, 200), setTimeout(measure, 500)]
+    const timers = [setTimeout(measure, 60), setTimeout(measure, 220), setTimeout(measure, 520)]
     return () => {
       if (ro) ro.disconnect()
       window.removeEventListener('resize', measure)
       window.removeEventListener('orientationchange', measure)
       timers.forEach(clearTimeout)
     }
-  }, [showPlayer])
+  }, [showPlayer, isPhone])
 
   useEffect(() => {
     writeLS(K.prefs, { theme, sort, density, era, favOnly, volume, muted, shuffle, repeat })
@@ -755,31 +773,23 @@ export default function App() {
         {view === 'library' && (
           <>
             <div className="toolbar">
-              <div className="wrap toolbar-in">
-                <button className="brand" onClick={goHome} aria-label="Nenormalizm Recs — в начало каталога">
-                  <Logo h={46} playing={isPlaying} />
+              <div className="wrap toolbar-grid">
+                <button className="brand tb-brand" onClick={goHome} aria-label="Nenormalizm Recs — в начало каталога">
+                  <Logo h={isPhone ? 36 : 46} playing={isPlaying} />
                   <span className="brand-text"><b>Nenormalizm Recs</b><span>archive radio</span></span>
                 </button>
 
-                <div className="search">
+                <div className="search tb-search">
                   <ISearch size={16} />
                   <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: релиз, артист, каталог…" aria-label="Поиск по каталогу" />
                   {query && <button className="search-clear" onClick={() => setQuery('')} aria-label="Очистить поиск"><IClose size={15} /></button>}
                 </div>
 
-                <button className="btn btn-primary" onClick={startRadio} disabled={!visibleAlbums.length}><IPlay size={15} /> Радио</button>
-
-                <button className="icon-btn" aria-pressed={density === 'list'} onClick={() => setDensity(density === 'grid' ? 'list' : 'grid')} aria-label="Плотность списка" title="Плитка / список">
-                  {density === 'grid' ? <IList size={17} /> : <IGrid size={17} />}
+                <button className="btn btn-primary tb-radio" onClick={startRadio} disabled={!visibleAlbums.length}>
+                  <IPlay size={15} /> Радио
                 </button>
 
-                <button className="icon-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Сменить тему" title="Тема">
-                  {theme === 'dark' ? <ISun size={17} /> : <IMoon size={17} />}
-                </button>
-              </div>
-
-              <div className="wrap toolbar-in second">
-                <div className="chips" role="group" aria-label="Фильтры">
+                <div className="chips tb-chips" role="group" aria-label="Фильтры">
                   <button className="chip fav" aria-pressed={favOnly} onClick={() => setFavOnly((v) => !v)}>
                     <IHeart size={13} filled={favOnly} /> Избранное{totalFavs > 0 ? ` · ${totalFavs}` : ''}
                   </button>
@@ -788,14 +798,24 @@ export default function App() {
                   ))}
                 </div>
 
-                <select className="select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Сортировка">
+                <select className="select tb-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Сортировка">
                   <option value="new">Сначала новые</option>
                   <option value="old">Сначала старые</option>
                   <option value="title">По названию</option>
                   <option value="artist">По артисту</option>
                 </select>
 
-                <button className="icon-btn lib-refresh" onClick={loadLibrary} aria-label="Обновить каталог" title="Обновить каталог" disabled={libLoading}><IRetry size={17} /></button>
+                <button className="icon-btn tb-density" aria-pressed={density === 'list'} onClick={() => setDensity(density === 'grid' ? 'list' : 'grid')} aria-label="Плотность списка" title="Плитка / список">
+                  {density === 'grid' ? <IList size={17} /> : <IGrid size={17} />}
+                </button>
+
+                <button className="icon-btn tb-refresh" onClick={loadLibrary} aria-label="Обновить каталог" title="Обновить каталог" disabled={libLoading}>
+                  <IRetry size={17} />
+                </button>
+
+                <button className="icon-btn tb-theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Сменить тему" title="Тема">
+                  {theme === 'dark' ? <ISun size={17} /> : <IMoon size={17} />}
+                </button>
               </div>
             </div>
 
