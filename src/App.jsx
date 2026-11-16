@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import Logo from './Logo.jsx'
+import Stats from './Stats.jsx'
+import { analytics } from './analytics.js'
 
 const UPLOADER_EMAILS = [
   'nenormalizm@gmail.com',
@@ -137,11 +139,12 @@ function buildTracks(data, identifier) {
 
 function parseHash() {
   const h = window.location.hash.replace(/^#/, '')
+  if (h === '/stats' || h.startsWith('/stats')) return { name: 'stats', id: null }
   const m = h.match(/^\/album\/(.+)$/)
   if (m) { try { return { name: 'album', id: decodeURIComponent(m[1]) } } catch { return { name: 'album', id: m[1] } } }
   return { name: 'library', id: null }
 }
-const hashFor = (r) => (r.name === 'album' ? `#/album/${encodeURIComponent(r.id)}` : '#/')
+const hashFor = (r) => (r.name === 'album' ? `#/album/${encodeURIComponent(r.id)}` : r.name === 'stats' ? '#/stats' : '#/')
 
 const S = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
 const Ico = ({ d, size = 18, children, ...p }) => (
@@ -172,6 +175,7 @@ const IDisc = (p) => <Ico {...p} d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 10a2
 const IGrip = (p) => <Ico {...p} d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
 const ITrash = (p) => <Ico {...p} d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
 const IUp = (p) => <Ico {...p} d="M12 19V5M5 12l7-7 7 7" />
+const IChart = (p) => <Ico {...p} d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
 
 function Cover({ src, alt, className, seed, style }) {
   const [failed, setFailed] = useState(false)
@@ -259,9 +263,12 @@ export default function App() {
   const restored = useRef(false)
   const dragFrom = useRef(null)
   const scrubbing = useRef(false)
+  const listenTick = useRef(null)
+  const countedPlay = useRef(null)
+  const searchTimer = useRef(null)
 
   const current = qIndex >= 0 && qIndex < queue.length ? queue[qIndex] : null
-  const view = route.name === 'album' ? 'album' : 'library'
+  const view = route.name === 'album' ? 'album' : route.name === 'stats' ? 'stats' : 'library'
   const showPlayer = !!(current || resume)
 
   const toast = useCallback((msg, tone = 'info', action = null) => {
@@ -271,6 +278,8 @@ export default function App() {
   }, [])
 
   const haptic = useCallback((kind = 'light') => { try { tg?.HapticFeedback?.impactOccurred(kind) } catch {} }, [tg])
+
+  useEffect(() => { analytics.init({ theme }) }, [])
 
   useEffect(() => {
     const rs = document.documentElement.style
@@ -305,6 +314,7 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    analytics.setTheme(theme)
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#07080c'
     try { tg?.setHeaderColor?.(bg); tg?.setBackgroundColor?.(bg) } catch {}
     const meta = document.querySelector('meta[name="theme-color"]')
@@ -373,9 +383,11 @@ export default function App() {
       }
       viewAlbumIdRef.current = id
       setViewAlbum(built); setViewTracks(built.tracks)
+      analytics.event('album', { album: id })
     } catch (e) {
       viewAlbumIdRef.current = null
       setAlbumError(e?.message || 'Не удалось загрузить релиз')
+      analytics.event('error')
     } finally { setAlbumLoading(false) }
   }, [fetchAlbum, toast])
 
@@ -402,13 +414,13 @@ export default function App() {
   }, [navigate, queueOpen])
 
   const goHome = useCallback(() => {
-    if (routeRef.current.name === 'album') goBack()
+    if (routeRef.current.name !== 'library') goBack()
     else window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [goBack])
 
   useEffect(() => {
     const initial = parseHash()
-    if (initial.name === 'album') {
+    if (initial.name !== 'library') {
       window.history.replaceState({ app: true, depth: 0 }, '', '#/')
       depth.current = 1
       window.history.pushState({ app: true, depth: 1 }, '', hashFor(initial))
@@ -437,7 +449,7 @@ export default function App() {
     if (!bb) return
     const handler = () => goBack()
     try {
-      if (view === 'album' || queueOpen) bb.show(); else bb.hide()
+      if (view !== 'library' || queueOpen) bb.show(); else bb.hide()
       bb.onClick(handler)
     } catch {}
     return () => { try { bb.offClick(handler) } catch {} }
@@ -467,8 +479,14 @@ export default function App() {
   }, [visibleAlbums, favOnly, era, query, sort, favs])
 
   const totalFavs = useMemo(() => visibleAlbums.filter((a) => favs.has(a.identifier)).length, [visibleAlbums, favs])
-  const resetFilters = useCallback(() => { setFavOnly(false); setEra('all'); setQuery('') }, [])
+  const resetFilters = useCallback(() => { setFavOnly(false); setEra('all'); setQuery(''); analytics.event('filter') }, [])
   const filtersActive = favOnly || era !== 'all' || query.trim() !== ''
+
+  const onSearch = useCallback((v) => {
+    setQuery(v)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => { if (v.trim()) analytics.event('search') }, 900)
+  }, [])
 
   const requestPlay = useCallback(() => {
     wantPlay.current = true
@@ -484,6 +502,7 @@ export default function App() {
     if (startKey) { const i = order.findIndex((t) => t.key === startKey); if (i > 0) { const [pick] = order.splice(i, 1); order.unshift(pick) } }
     setPlayerAlbum(album); setBaseTracks(tracks); setQueue(order); setQIndex(0)
     setCurrentTime(0); setBuffered(0); setDuration(order[0]?.duration || 0); setResume(null)
+    countedPlay.current = null
     requestPlay(); haptic('medium')
   }, [shuffle, requestPlay, haptic])
 
@@ -515,6 +534,7 @@ export default function App() {
     if (!pool.length) return
     setShuffle(true)
     playAlbum(pool[Math.floor(Math.random() * pool.length)], { shuffled: true })
+    analytics.event('radio')
     toast('Радио запущено — случайный релиз', 'success')
   }, [filtered, visibleAlbums, playAlbum, toast])
 
@@ -531,6 +551,7 @@ export default function App() {
           const order = shuffle ? shuffleArr(built.tracks) : (dir > 0 ? built.tracks : [...built.tracks].reverse())
           setPlayerAlbum(built); setBaseTracks(built.tracks); setQueue(order); setQIndex(0)
           setCurrentTime(0); setBuffered(0); setDuration(order[0]?.duration || 0)
+          countedPlay.current = null
           requestPlay(); return
         }
       } catch {}
@@ -539,17 +560,24 @@ export default function App() {
     toast('Больше нет релизов с аудио', 'warn')
   }, [visibleAlbums, playerAlbum, fetchAlbum, shuffle, requestPlay, toast])
 
+  const markSkip = useCallback(() => {
+    const a = audioRef.current
+    const d = a?.duration
+    if (Number.isFinite(d) && d > 0 && a.currentTime / d < 0.9) analytics.event('skip')
+  }, [])
+
   const playNext = useCallback(() => {
     if (!queue.length) return
+    markSkip()
     if (qIndex < queue.length - 1) { setQIndex(qIndex + 1); setCurrentTime(0); requestPlay(); haptic() }
     else if (repeat === 'album') { setQIndex(0); setCurrentTime(0); requestPlay() }
     else if (repeat === 'all') nextAlbumAuto(1)
     else { wantPlay.current = false; setBuffering(false); audioRef.current?.pause() }
-  }, [queue.length, qIndex, repeat, nextAlbumAuto, requestPlay, haptic])
+  }, [queue.length, qIndex, repeat, nextAlbumAuto, requestPlay, haptic, markSkip])
 
   const playPrev = useCallback(() => {
     const a = audioRef.current
-    if (a && a.currentTime > 3) { a.currentTime = 0; setCurrentTime(0); return }
+    if (a && a.currentTime > 3) { a.currentTime = 0; setCurrentTime(0); analytics.event('seek'); return }
     if (qIndex > 0) { setQIndex(qIndex - 1); setCurrentTime(0); requestPlay(); haptic() }
     else if (repeat === 'all') nextAlbumAuto(-1)
     else if (a) { a.currentTime = 0; setCurrentTime(0) }
@@ -561,7 +589,8 @@ export default function App() {
       if (queue.length) { setQIndex(0); requestPlay() } else startRadio()
       return
     }
-    if (isPlaying) { wantPlay.current = false; setBuffering(false); a?.pause() } else requestPlay()
+    if (isPlaying) { wantPlay.current = false; setBuffering(false); a?.pause(); analytics.event('pause') }
+    else requestPlay()
     haptic()
   }, [current, queue.length, isPlaying, requestPlay, startRadio, haptic])
 
@@ -580,11 +609,25 @@ export default function App() {
       }
       return next
     })
+    analytics.event('shuffle')
     haptic()
   }, [queue, current, baseTracks, qIndex, haptic])
 
-  const cycleRepeat = useCallback(() => { setRepeat((r) => (r === 'off' ? 'all' : r === 'all' ? 'album' : 'off')); haptic() }, [haptic])
-  const toggleFav = useCallback((id) => { setFavs((f) => { const n = new Set(f); if (n.has(id)) n.delete(id); else n.add(id); return n }); haptic() }, [haptic])
+  const cycleRepeat = useCallback(() => {
+    setRepeat((r) => (r === 'off' ? 'all' : r === 'all' ? 'album' : 'off'))
+    analytics.event('repeat')
+    haptic()
+  }, [haptic])
+
+  const toggleFav = useCallback((id) => {
+    setFavs((f) => {
+      const n = new Set(f)
+      if (n.has(id)) { n.delete(id); analytics.event('fav_remove', { album: id }) }
+      else { n.add(id); analytics.event('fav_add', { album: id }) }
+      return n
+    })
+    haptic()
+  }, [haptic])
 
   const removeFromQueue = useCallback((key) => {
     const idx = queue.findIndex((t) => t.key === key)
@@ -597,6 +640,7 @@ export default function App() {
     else if (idx === qIndex) nextIndex = Math.min(qIndex, nextQueue.length - 1)
     setQueue(nextQueue); setQIndex(nextIndex)
     if (!nextQueue.length) { wantPlay.current = false; audioRef.current?.pause() }
+    analytics.event('q_remove')
     toast(`«${removed.title}» убран из очереди`, 'info', { label: 'Отменить', run: () => { setQueue(snapshot.queue); setQIndex(snapshot.qIndex) } })
   }, [queue, qIndex, toast])
 
@@ -608,6 +652,7 @@ export default function App() {
     next.splice(to, 0, moved)
     setQueue(next)
     if (curKey) setQIndex(Math.max(0, next.findIndex((t) => t.key === curKey)))
+    analytics.event('q_reorder')
   }, [queue, current])
 
   const restoreOrder = useCallback(() => {
@@ -618,7 +663,7 @@ export default function App() {
   }, [baseTracks, current])
 
   useEffect(() => { const a = audioRef.current; if (a) a.volume = muted ? 0 : volume }, [volume, muted, current])
-  useEffect(() => { setCurrentTime(0); setBuffered(0); setDuration(current?.duration || 0) }, [current?.key])
+  useEffect(() => { setCurrentTime(0); setBuffered(0); setDuration(current?.duration || 0); listenTick.current = null }, [current?.key])
 
   const onCanPlay = () => {
     const a = audioRef.current
@@ -639,6 +684,7 @@ export default function App() {
 
   const onAudioError = () => {
     setBuffering(false); setIsPlaying(false)
+    analytics.event('error')
     if (!current) return
     toast(`Не удалось загрузить «${current.title}»`, 'error', { label: 'Пропустить', run: () => playNext() })
   }
@@ -663,13 +709,15 @@ export default function App() {
     const a = audioRef.current
     if (a) { try { a.currentTime = t } catch {} }
     setCurrentTime(t); setScrub(null)
+    listenTick.current = t
+    analytics.event('seek')
   }
   const seekKey = (e) => {
     if (!current || !duration) return
     const a = audioRef.current
     if (!a) return
-    if (e.key === 'ArrowRight') { a.currentTime = Math.min(duration, a.currentTime + 5); e.preventDefault() }
-    if (e.key === 'ArrowLeft') { a.currentTime = Math.max(0, a.currentTime - 5); e.preventDefault() }
+    if (e.key === 'ArrowRight') { a.currentTime = Math.min(duration, a.currentTime + 5); e.preventDefault(); analytics.event('seek') }
+    if (e.key === 'ArrowLeft') { a.currentTime = Math.max(0, a.currentTime - 5); e.preventDefault(); analytics.event('seek') }
     if (e.key === 'Home') { a.currentTime = 0; e.preventDefault() }
     if (e.key === 'End') { a.currentTime = Math.max(0, duration - 1); e.preventDefault() }
   }
@@ -712,7 +760,7 @@ export default function App() {
       if (e.key === 'Escape') {
         if (queueOpen) { setQueueOpen(false); e.preventDefault(); return }
         if (typing) { t.blur(); return }
-        if (view === 'album') { goBack(); e.preventDefault() }
+        if (view !== 'library') { goBack(); e.preventDefault() }
         return
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
@@ -758,12 +806,29 @@ export default function App() {
           ref={audioRef}
           src={current?.url}
           preload="metadata"
-          onPlay={() => { setIsPlaying(true); setBuffering(false); setResume(null) }}
+          onPlay={() => {
+            setIsPlaying(true); setBuffering(false); setResume(null)
+            if (current && playerAlbum && countedPlay.current !== current.key) {
+              countedPlay.current = current.key
+              const idx = baseTracks.findIndex((t) => t.key === current.key)
+              analytics.play(playerAlbum.identifier, idx >= 0 ? idx : 0, FORMAT_SHORT[current.format] || 'OTHER')
+            }
+          }}
           onPause={() => setIsPlaying(false)}
-          onEnded={playNext}
+          onEnded={() => {
+            if (current && playerAlbum) {
+              const idx = baseTracks.findIndex((t) => t.key === current.key)
+              analytics.complete(playerAlbum.identifier, idx >= 0 ? idx : 0)
+            }
+            playNext()
+          }}
           onCanPlay={onCanPlay}
           onLoadedMetadata={(e) => { setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : (current?.duration || 0)); onCanPlay() }}
-          onTimeUpdate={(e) => { if (!scrubbing.current) setCurrentTime(e.currentTarget.currentTime) }}
+          onTimeUpdate={(e) => {
+            const t = e.currentTarget.currentTime
+            if (!scrubbing.current) setCurrentTime(t)
+            analytics.tick(t, isPlaying && !scrubbing.current, listenTick)
+          }}
           onProgress={onProgress}
           onWaiting={() => setBuffering(true)}
           onPlaying={() => setBuffering(false)}
@@ -781,7 +846,7 @@ export default function App() {
 
                 <div className="search tb-search">
                   <ISearch size={16} />
-                  <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: релиз, артист, каталог…" aria-label="Поиск по каталогу" />
+                  <input type="search" value={query} onChange={(e) => onSearch(e.target.value)} placeholder="Поиск: релиз, артист, каталог…" aria-label="Поиск по каталогу" />
                   {query && <button className="search-clear" onClick={() => setQuery('')} aria-label="Очистить поиск"><IClose size={15} /></button>}
                 </div>
 
@@ -790,22 +855,22 @@ export default function App() {
                 </button>
 
                 <div className="chips tb-chips" role="group" aria-label="Фильтры">
-                  <button className="chip fav" aria-pressed={favOnly} onClick={() => setFavOnly((v) => !v)}>
+                  <button className="chip fav" aria-pressed={favOnly} onClick={() => { setFavOnly((v) => !v); analytics.event('filter') }}>
                     <IHeart size={13} filled={favOnly} /> Избранное{totalFavs > 0 ? ` · ${totalFavs}` : ''}
                   </button>
                   {decades.map((d) => (
-                    <button key={d} className="chip era" aria-pressed={String(era) === String(d)} onClick={() => setEra(String(era) === String(d) ? 'all' : String(d))}>{d}-е</button>
+                    <button key={d} className="chip era" aria-pressed={String(era) === String(d)} onClick={() => { setEra(String(era) === String(d) ? 'all' : String(d)); analytics.event('filter') }}>{d}-е</button>
                   ))}
                 </div>
 
-                <select className="select tb-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Сортировка">
+                <select className="select tb-sort" value={sort} onChange={(e) => { setSort(e.target.value); analytics.event('filter') }} aria-label="Сортировка">
                   <option value="new">Сначала новые</option>
                   <option value="old">Сначала старые</option>
                   <option value="title">По названию</option>
                   <option value="artist">По артисту</option>
                 </select>
 
-                <button className="icon-btn tb-density" aria-pressed={density === 'list'} onClick={() => setDensity(density === 'grid' ? 'list' : 'grid')} aria-label="Плотность списка" title="Плитка / список">
+                <button className="icon-btn tb-density" aria-pressed={density === 'list'} onClick={() => { setDensity(density === 'grid' ? 'list' : 'grid'); analytics.event('filter') }} aria-label="Плотность списка" title="Плитка / список">
                   {density === 'grid' ? <IList size={17} /> : <IGrid size={17} />}
                 </button>
 
@@ -899,6 +964,18 @@ export default function App() {
                   })}
                 </div>
               )}
+
+              <div className="album-foot" style={{ paddingTop: 22, paddingBottom: 6 }}>
+                <IDisc size={14} />
+                <span>Архив лейбла · archive.org</span>
+                <button
+                  className="btn btn-quiet"
+                  style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: 'auto' }}
+                  onClick={() => navigate({ name: 'stats', id: null })}
+                >
+                  <IChart size={14} /> Статистика
+                </button>
+              </div>
             </div>
           </>
         )}
@@ -1018,6 +1095,8 @@ export default function App() {
             )}
           </>
         )}
+
+        {view === 'stats' && <Stats albums={visibleAlbums} onBack={goBack} />}
 
         <div className="player-spacer" aria-hidden="true" />
       </div>
