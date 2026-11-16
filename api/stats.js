@@ -1,10 +1,10 @@
 /**
  * Приём обезличенной агрегированной телеметрии.
  * IP и User-Agent не читаются и не сохраняются, cookies не выставляются.
- * Пустой payload (все нули) — это проверка здоровья, он ничего не записывает.
- *
- * ENV: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, TELEMETRY
+ * Пустой payload — проверка здоровья, ничего не записывает.
  */
+
+import { cfg, pipeline, errorPayload } from '../lib/redis.js'
 
 const EV = ['open', 'album', 'play', 'pause', 'complete', 'skip', 'seek', 'radio', 'search', 'filter', 'fav_add', 'fav_remove', 'q_remove', 'q_reorder', 'shuffle', 'repeat', 'error']
 const PLAT = ['ios', 'android', 'desktop', 'web', 'other']
@@ -16,14 +16,6 @@ const TRACK_RE = /^[A-Za-z0-9._-]{1,120}\|\d{1,3}$/
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 const NONCE_RE = /^[a-f0-9]{24}$/
 const TTL = 60 * 60 * 24 * 120
-
-const url = process.env.UPSTASH_REDIS_REST_URL
-const token = process.env.UPSTASH_REDIS_REST_TOKEN
-
-function enabled() {
-  const raw = String(process.env.TELEMETRY ?? process.env.VITE_TELEMETRY ?? '').trim().toLowerCase()
-  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes'
-}
 
 function int(v, max) {
   const n = Number(v)
@@ -57,16 +49,6 @@ function pickKeyed(raw, re, maxKeys, maxVal) {
   return out
 }
 
-async function redis(commands) {
-  const r = await fetch(`${url}/pipeline`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(commands),
-  })
-  if (!r.ok) throw new Error(`storage ${r.status}`)
-  return r.json()
-}
-
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -79,21 +61,19 @@ export default async function handler(req, res) {
   const origin = req.headers.origin
   const host = req.headers['x-forwarded-host'] || req.headers.host
   if (origin) {
-    try {
-      if (new URL(origin).host !== host) return res.status(403).end()
-    } catch { return res.status(403).end() }
+    try { if (new URL(origin).host !== host) return res.status(403).end() } catch { return res.status(403).end() }
   }
 
-  if (!url || !token) return res.status(503).json({ error: 'storage_not_configured' })
-  if (!enabled()) return res.status(403).json({ error: 'telemetry_disabled' })
+  const c = cfg()
+  if (!c.url || !c.token) return res.status(503).json({ error: 'storage_not_configured' })
+  if (!c.enabled) return res.status(403).json({ error: 'telemetry_disabled' })
 
   let body = req.body
   if (typeof body === 'string') {
     if (body.length > 20000) return res.status(413).end()
     try { body = JSON.parse(body) } catch { return res.status(400).end() }
   }
-  if (!body || typeof body !== 'object') return res.status(400).end()
-  if (body.v !== 1) return res.status(400).end()
+  if (!body || typeof body !== 'object' || body.v !== 1) return res.status(400).end()
 
   const day = DAY_RE.test(body.day) ? body.day : new Date().toISOString().slice(0, 10)
   const nc = NONCE_RE.test(body.nonce || '') ? body.nonce : null
@@ -112,7 +92,7 @@ export default async function handler(req, res) {
   if (!total) return res.status(204).end()
 
   try {
-    const lock = await redis([['SET', `nr:n:${nc}`, '1', 'NX', 'EX', '86400']])
+    const lock = await pipeline([['SET', `nr:n:${nc}`, '1', 'NX', 'EX', '86400']])
     if (!lock?.[0]?.result) return res.status(204).end()
 
     const dKey = `nr:d:${day}`
@@ -134,9 +114,9 @@ export default async function handler(req, res) {
     if (Object.keys(fmt).length) touched.add(`nr:f:${day}`)
     touched.forEach((k) => cmds.push(['EXPIRE', k, TTL]))
 
-    await redis(cmds)
+    await pipeline(cmds)
     return res.status(204).end()
-  } catch {
-    return res.status(502).end()
+  } catch (e) {
+    return res.status(502).json(errorPayload(e))
   }
 }
