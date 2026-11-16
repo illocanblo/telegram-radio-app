@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import Logo from './Logo.jsx'
 import Stats from './Stats.jsx'
+import Links from './Links.jsx'
 import { analytics } from './analytics.js'
+import {
+  readStartParam, routeFromParam, readRoute, writeRoute,
+  paramForAlbum, directLink, webLink, getLinkConfig, copyText,
+} from './deeplink.js'
 
-const UPLOADER_EMAILS = [
-  'nenormalizm@gmail.com',
-  'nenormalizmlab@gmail.com',
-  'sobrio21@yandex.ru',
-]
+const UPLOADER_EMAILS = ['nenormalizm@gmail.com', 'nenormalizmlab@gmail.com', 'sobrio21@yandex.ru']
 
 const FORMAT_RANK = { 'VBR MP3': 0, MP3: 1, M4A: 2, AAC: 2, 'Ogg Vorbis': 3, Opus: 3, FLAC: 4, Flac: 4, Shorten: 5 }
 const FORMAT_SHORT = { 'VBR MP3': 'MP3', MP3: 'MP3', M4A: 'M4A', AAC: 'AAC', 'Ogg Vorbis': 'OGG', Opus: 'OPUS', FLAC: 'FLAC', Flac: 'FLAC', Shorten: 'SHN' }
@@ -137,15 +138,6 @@ function buildTracks(data, identifier) {
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
 }
 
-function parseHash() {
-  const h = window.location.hash.replace(/^#/, '')
-  if (h === '/stats' || h.startsWith('/stats')) return { name: 'stats', id: null }
-  const m = h.match(/^\/album\/(.+)$/)
-  if (m) { try { return { name: 'album', id: decodeURIComponent(m[1]) } } catch { return { name: 'album', id: m[1] } } }
-  return { name: 'library', id: null }
-}
-const hashFor = (r) => (r.name === 'album' ? `#/album/${encodeURIComponent(r.id)}` : r.name === 'stats' ? '#/stats' : '#/')
-
 const S = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
 const Ico = ({ d, size = 18, children, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" {...p}>{d ? <path d={d} {...S} /> : children}</svg>
@@ -176,6 +168,7 @@ const IGrip = (p) => <Ico {...p} d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.0
 const ITrash = (p) => <Ico {...p} d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
 const IUp = (p) => <Ico {...p} d="M12 19V5M5 12l7-7 7 7" />
 const IChart = (p) => <Ico {...p} d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+const ILink = (p) => <Ico {...p} d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" />
 
 function Cover({ src, alt, className, seed, style }) {
   const [failed, setFailed] = useState(false)
@@ -227,8 +220,9 @@ export default function App() {
   const [libError, setLibError] = useState('')
   const [favs, setFavs] = useState(() => new Set(readLS(K.favs, [])))
   const [hidden, setHidden] = useState(() => new Set(readLS(K.hidden, [])))
+  const [radioRequested, setRadioRequested] = useState(false)
 
-  const [route, setRoute] = useState(() => parseHash())
+  const [route, setRoute] = useState(() => readRoute())
   const [viewAlbum, setViewAlbum] = useState(null)
   const [viewTracks, setViewTracks] = useState([])
   const [albumLoading, setAlbumLoading] = useState(false)
@@ -268,7 +262,7 @@ export default function App() {
   const searchTimer = useRef(null)
 
   const current = qIndex >= 0 && qIndex < queue.length ? queue[qIndex] : null
-  const view = route.name === 'album' ? 'album' : route.name === 'stats' ? 'stats' : 'library'
+  const view = route.name === 'album' ? 'album' : route.name === 'stats' ? 'stats' : route.name === 'links' ? 'links' : 'library'
   const showPlayer = !!(current || resume)
 
   const toast = useCallback((msg, tone = 'info', action = null) => {
@@ -399,9 +393,8 @@ export default function App() {
   }, [openAlbumView])
 
   const navigate = useCallback((next, { replace = false } = {}) => {
-    const url = hashFor(next)
-    if (replace) window.history.replaceState({ app: true, depth: depth.current }, '', url)
-    else { depth.current += 1; window.history.pushState({ app: true, depth: depth.current }, '', url) }
+    if (!replace) depth.current += 1
+    writeRoute(next, { replace, depth: depth.current })
     applyRoute(next)
   }, [applyRoute])
 
@@ -419,21 +412,27 @@ export default function App() {
   }, [goBack])
 
   useEffect(() => {
-    const initial = parseHash()
-    if (initial.name !== 'library') {
-      window.history.replaceState({ app: true, depth: 0 }, '', '#/')
+    const deep = routeFromParam(readStartParam())
+    const initial = deep || readRoute()
+
+    writeRoute({ name: 'library', id: null }, { replace: true, depth: 0 })
+    depth.current = 0
+    if (initial.name !== 'library' || initial.action) {
       depth.current = 1
-      window.history.pushState({ app: true, depth: 1 }, '', hashFor(initial))
-    } else {
-      window.history.replaceState({ app: true, depth: 0 }, '', '#/')
-      depth.current = 0
+      writeRoute(initial, { replace: false, depth: 1 })
     }
+
     routeRef.current = initial
     setRoute(initial)
-    if (initial.name === 'album') openAlbumView(initial.id)
+
+    if (initial.action === 'fav') setFavOnly(true)
+    if (initial.action === 'decade') setEra(String(initial.value))
+    if (initial.action === 'search') setQuery(String(initial.value || ''))
+    if (initial.action === 'radio') setRadioRequested(true)
+    if (initial.name === 'album' && initial.id) openAlbumView(initial.id)
 
     const sync = () => {
-      const next = parseHash()
+      const next = readRoute()
       const st = window.history.state
       depth.current = typeof st?.depth === 'number' ? st.depth : 0
       if (next.name === routeRef.current.name && next.id === routeRef.current.id) return
@@ -545,6 +544,12 @@ export default function App() {
     analytics.event('radio')
     toast('Радио запущено — случайный релиз', 'success')
   }, [filtered, visibleAlbums, playAlbum, toast])
+
+  useEffect(() => {
+    if (!radioRequested || !visibleAlbums.length) return
+    setRadioRequested(false)
+    startRadio()
+  }, [radioRequested, visibleAlbums, startRadio])
 
   const nextAlbumAuto = useCallback(async (dir = 1) => {
     const pool = visibleAlbums
@@ -670,6 +675,21 @@ export default function App() {
     setShuffle(false)
   }, [baseTracks, current])
 
+  const shareAlbum = useCallback(async (album) => {
+    if (!album) return
+    const param = paramForAlbum(album.identifier)
+    const cfg = getLinkConfig()
+    const tgLink = cfg.bot && param ? directLink({ bot: cfg.bot, app: cfg.app, param, compact: cfg.compact }) : ''
+    const link = tgLink || webLink(param)
+    const ok = await copyText(link)
+    if (ok) {
+      toast(tgLink ? 'Прямая ссылка на релиз скопирована' : 'Веб-ссылка скопирована. Username бота задаётся в разделе «Ссылки»', 'success',
+        tgLink ? null : { label: 'Открыть «Ссылки»', run: () => navigate({ name: 'links', id: null }) })
+    } else {
+      toast('Не удалось скопировать ссылку', 'error')
+    }
+  }, [toast, navigate])
+
   useEffect(() => { const a = audioRef.current; if (a) a.volume = muted ? 0 : volume }, [volume, muted, current])
   useEffect(() => { setCurrentTime(0); setBuffered(0); setDuration(current?.duration || 0); listenTick.current = null }, [current?.key])
 
@@ -742,6 +762,7 @@ export default function App() {
 
   useEffect(() => {
     if (restored.current) return
+    if (routeRef.current.name === 'album') return
     const s = readLS(K.session, null)
     if (!s?.albumId || !s?.trackKey) return
     if (Date.now() - (s.ts || 0) > 1000 * 60 * 60 * 48) return
@@ -753,8 +774,7 @@ export default function App() {
       const finalOrder = idx > 0 ? [order[idx], ...order.filter((_, i) => i !== idx)] : order
       const dur = finalOrder[0]?.duration || 0
       const saved = Number(s.time) || 0
-      const nearEnd = dur > 0 && saved >= dur - 5
-      const startTime = nearEnd ? 0 : saved
+      const startTime = dur > 0 && saved >= dur - 5 ? 0 : saved
       setPlayerAlbum(built); setBaseTracks(built.tracks); setQueue(finalOrder); setQIndex(0)
       if (typeof s.shuffle === 'boolean') setShuffle(s.shuffle)
       if (s.repeat) setRepeat(s.repeat)
@@ -973,11 +993,10 @@ export default function App() {
               <div className="album-foot" style={{ paddingTop: 22, paddingBottom: 6 }}>
                 <IDisc size={14} />
                 <span>Архив лейбла · archive.org</span>
-                <button
-                  className="btn btn-quiet"
-                  style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: 'auto' }}
-                  onClick={() => navigate({ name: 'stats', id: null })}
-                >
+                <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5, marginLeft: 'auto' }} onClick={() => navigate({ name: 'links', id: null })}>
+                  <ILink size={14} /> Ссылки
+                </button>
+                <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'stats', id: null })}>
                   <IChart size={14} /> Статистика
                 </button>
               </div>
@@ -993,6 +1012,11 @@ export default function App() {
                 <button className="bar-logo" onClick={goHome} aria-label="В каталог"><Logo h={28} playing={isPlaying} /></button>
                 <span className="crumb">Библиотека / {viewAlbum ? catalogOf(viewAlbum) : route.id}</span>
                 <div className="bar-actions">
+                  {viewAlbum && (
+                    <button className="icon-btn" onClick={() => shareAlbum(viewAlbum)} aria-label="Поделиться релизом" title="Поделиться релизом">
+                      <ILink size={17} />
+                    </button>
+                  )}
                   {viewAlbum && (
                     <button
                       className="icon-btn"
@@ -1052,6 +1076,7 @@ export default function App() {
                       <div className="hero-actions">
                         <button className="btn btn-primary" onClick={() => startAlbum(viewAlbum, viewTracks, null, false)}><IPlay size={15} /> Слушать релиз</button>
                         <button className="btn btn-ghost" onClick={() => { setShuffle(true); startAlbum(viewAlbum, viewTracks, null, true) }}><IShuffle size={15} /> Вперемешку</button>
+                        <button className="btn btn-ghost" onClick={() => shareAlbum(viewAlbum)}><ILink size={15} /> Поделиться</button>
                       </div>
                       {viewAlbum.description && (
                         <div className="desc">
@@ -1102,6 +1127,7 @@ export default function App() {
         )}
 
         {view === 'stats' && <Stats albums={visibleAlbums} onBack={goBack} />}
+        {view === 'links' && <Links albums={visibleAlbums} onBack={goBack} currentAlbumId={viewAlbum?.identifier || null} />}
 
         <div className="player-spacer" aria-hidden="true" />
       </div>
