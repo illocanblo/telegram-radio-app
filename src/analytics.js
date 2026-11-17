@@ -188,7 +188,7 @@ export const analytics = {
     ctx.plat = platformClass()
     countSession()
     this.event('open')
-    flushTimer = setInterval(() => flush(), FLUSH_MS)
+    setInterval(flush, FLUSH_MS)
     window.addEventListener('pagehide', onPageHide)
     window.addEventListener('visibilitychange', onVisibility)
     persist()
