@@ -184,8 +184,15 @@ body {
 
 /* ---------- логотип ---------- */
 .logo { position: relative; display: inline-flex; align-items: center; flex: none; transition: transform 0.2s var(--ease); }
-.logo-mark { height: var(--logo-h, 44px); display: flex; align-items: center; filter: var(--logo-mono); }
-.logo-mark svg, .logo-mark img { height: 100%; width: auto; max-width: min(46%, 240px); display: block; object-fit: contain; }
+.logo-mark { height: var(--logo-h, 44px); display: flex; align-items: center; filter: var(--logo-mono); flex: none; }
+.logo-mark svg, .logo-mark img {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: clamp(72px, 11vw, 136px);
+  object-fit: contain;
+  flex: none;
+}
 .logo.is-playing .logo-mark { filter: var(--logo-mono) drop-shadow(var(--logo-glow)); animation: logoBreath 2.8s ease-in-out infinite; }
 .logo-dot {
   position: absolute; right: -4px; top: -3px; z-index: 2;
