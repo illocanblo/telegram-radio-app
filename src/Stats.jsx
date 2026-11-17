@@ -227,7 +227,7 @@ function DiagList({ diag }) {
 
 export default function Stats({ albums = [], onBack }) {
   injectCss()
-  const [tick, setTick] = useState(0)
+  const [, setTick] = useState(0)
   const [status, setStatus] = useState(() => analytics.status())
   const [source, setSource] = useState('device')
   const [key, setKey] = useState(() => { try { return sessionStorage.getItem('nr.stats.key') || '' } catch { return '' } })
@@ -251,7 +251,7 @@ export default function Stats({ albums = [], onBack }) {
   useEffect(() => analytics.subscribe(sync), [sync])
   useEffect(() => { analytics.probe().then(sync) }, [sync])
 
-  const local = useMemo(() => summaryOf(analytics.getLocal()), [tick])
+  const local = summaryOf(analytics.getLocal())
 
   const albumIndex = useMemo(() => {
     const m = new Map()

@@ -121,7 +121,6 @@ function blankDelta() {
 let delta = blankDelta()
 let sessionCounted = false
 let ctx = { plat: platformClass(), theme: 'dark' }
-let flushTimer = null
 let started = false
 let override = readOverride()
 let cfg = { telemetry: FORCED, storage: false, summary: false, checked: false, reachable: false }

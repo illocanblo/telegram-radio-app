@@ -1,16 +1,36 @@
-# React + Vite
+# Nenormalizm Recs Radio
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A React + Vite Telegram Mini App and web player for the Nenormalizm Recs archive.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Browses and searches archive.org releases
+- Plays tracks with queue, shuffle, repeat, seek, volume, and resume controls
+- Syncs selected user state through Telegram CloudStorage
+- Supports Telegram deep links and native Mini App features
+- Provides optional privacy-aware statistics through Vercel and Upstash Redis
 
-## React Compiler
+## Development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```powershell
+npm install
+npm run dev
+npm run build
+npm run lint
+npm test
+npm run preview
+```
 
-## Expanding the Oxlint configuration
+## Deployment
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+The Vercel serverless API routes are in `api/` and the Redis helpers are in `lib/`.
+
+Optional server environment variables:
+
+- `TELEMETRY=1` to enable aggregate telemetry collection
+- `STATS_KEY` to protect statistics and diagnostics
+- `ADMIN_KEY` to validate owner-page access
+- `UPSTASH_REDIS_REST_URL` or `KV_REST_API_URL`
+- `UPSTASH_REDIS_REST_TOKEN` or `KV_REST_API_TOKEN`
+
+Keep all secret values in the deployment environment, never in source-controlled files.

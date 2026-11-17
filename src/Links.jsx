@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import {
   getLinkConfig, setLinkConfig, directLink, webLink, copyText, shareToTelegram,
   paramForAlbum, paramForQuery, PARAM_RADIO, PARAM_FAV, PARAM_STATS, PARAM_LINKS,
@@ -85,8 +85,6 @@ export default function Links({ albums = [], onBack, currentAlbumId = null }) {
   const [cfg, setCfg] = useState(() => getLinkConfig())
   const [pick, setPick] = useState(currentAlbumId || '')
   const [q, setQ] = useState('')
-
-  useEffect(() => { if (currentAlbumId) setPick(currentAlbumId) }, [currentAlbumId])
 
   const save = useCallback((patch) => setCfg(setLinkConfig({ ...cfg, ...patch })), [cfg])
 

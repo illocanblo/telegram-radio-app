@@ -15,6 +15,7 @@ import {
   setMainButton, setSecondaryButton, onMainButton, onSecondaryButton,
 } from './telegram.js'
 import * as sync from './sync.js'
+import useMedia from './hooks/useMedia.js'
 
 const UPLOADER_EMAILS = ['nenormalizm@gmail.com', 'nenormalizmlab@gmail.com', 'sobrio21@yandex.ru']
 
@@ -76,23 +77,6 @@ function storeMeta(id, d) {
     sessionStorage.setItem(META_IDX, JSON.stringify(idx))
   }
   try { write() } catch { try { purgeStoredMeta(); write() } catch {} }
-}
-
-function useMedia(query) {
-  const [match, setMatch] = useState(() => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query).matches : false))
-  useEffect(() => {
-    if (!window.matchMedia) return
-    const mq = window.matchMedia(query)
-    const on = () => setMatch(mq.matches)
-    on()
-    if (mq.addEventListener) mq.addEventListener('change', on)
-    else mq.addListener(on)
-    return () => {
-      if (mq.removeEventListener) mq.removeEventListener('change', on)
-      else mq.removeListener(on)
-    }
-  }, [query])
-  return match
 }
 
 function fmtTime(sec) {
@@ -437,13 +421,13 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(() => isFullscreen())
   const [homeStatus, setHomeStatus] = useState('unknown')
   const [dlKey, setDlKey] = useState(null)
+  const pendingOwnerRoute = useRef(null)
 
   const [route, setRoute] = useState(() => readRoute())
   const [viewShell, setViewShell] = useState(null)
   const [viewAlbum, setViewAlbum] = useState(null)
   const [viewTracks, setViewTracks] = useState([])
   const [isAdmin, setIsAdmin] = useState(false)
-  const [adminChecked, setAdminChecked] = useState(false)
   const [albumLoading, setAlbumLoading] = useState(false)
   const [albumError, setAlbumError] = useState('')
   const [descOpen, setDescOpen] = useState(false)
@@ -516,7 +500,7 @@ export default function App() {
 
   const haptic = useCallback((kind = 'light') => { try { tg?.HapticFeedback?.impactOccurred(kind) } catch {} }, [])
 
-  useEffect(() => { analytics.init({ theme }) }, [])
+  useEffect(() => { analytics.init({ theme }) }, [theme])
 
   useEffect(() => {
     if (!sync.enabled) { hydrating.current = false; return }
@@ -606,25 +590,47 @@ export default function App() {
       const params = new URLSearchParams(qs || '')
       const key = params.get('k')
 
-      if (key && !adminChecked) {
+      if (key) {
         try {
-          const res = await fetch(`/api/verify-admin?k=${encodeURIComponent(key)}`, {
+          const res = await fetch('/api/verify-admin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key },
+            body: JSON.stringify({ key }),
             cache: 'no-store',
           })
           const data = await res.json()
           if (alive && data.valid) {
             setIsAdmin(true)
             try { sessionStorage.setItem('nr.admin.valid', '1') } catch {}
+            const p = pendingOwnerRoute.current
+            if (p) {
+              pendingOwnerRoute.current = null
+              setRoute(p)
+              writeRoute(p, { replace: true, depth: 1 })
+            }
+            try {
+              const nextParams = new URLSearchParams(qs || '')
+              nextParams.delete('k')
+              const suffix = nextParams.toString()
+              const nextUrl = window.location.pathname + window.location.search + (suffix ? '#' + suffix : '')
+              window.history.replaceState(window.history.state, '', nextUrl)
+            } catch {}
           }
         } catch {}
-        setAdminChecked(true)
-      } else if (!key && !adminChecked) {
+      } else {
         // Check sessionStorage for previously validated admin session
         try {
           const saved = sessionStorage.getItem('nr.admin.valid')
-          if (alive && saved === '1') setIsAdmin(true)
+          if (alive && saved === '1') {
+            setIsAdmin(true)
+            const p = pendingOwnerRoute.current
+            if (p) {
+              pendingOwnerRoute.current = null
+              setRoute(p)
+              writeRoute(p, { replace: true, depth: 1 })
+            }
+          }
         } catch {}
-        setAdminChecked(true)
       }
     })()
     return () => { alive = false }
@@ -887,19 +893,26 @@ export default function App() {
 
     writeRoute({ name: 'library', id: null }, { replace: true, depth: 0 })
     depth.current = 0
-    if (initial.name !== 'library' || initial.action) {
+    const ownerInitial = (initial.name === 'stats' || initial.name === 'links') && !isAdmin
+    if (ownerInitial) {
+      pendingOwnerRoute.current = initial
+      routeRef.current = { name: 'library', id: null }
+      setRoute({ name: 'library', id: null })
+    } else if (initial.name !== 'library' || initial.action) {
       depth.current = 1
       writeRoute(initial, { replace: false, depth: 1 })
     }
 
-    routeRef.current = initial
-    setRoute(initial)
+    if (!ownerInitial) {
+      routeRef.current = initial
+      setRoute(initial)
+    }
 
-    if (initial.action === 'fav') setFavOnly(true)
-    if (initial.action === 'decade') setEra(String(initial.value))
-    if (initial.action === 'search') setQuery(String(initial.value || ''))
-    if (initial.action === 'radio') setRadioRequested(true)
-    if (initial.name === 'album' && initial.id) {
+    if (!ownerInitial && initial.action === 'fav') setFavOnly(true)
+    if (!ownerInitial && initial.action === 'decade') setEra(String(initial.value))
+    if (!ownerInitial && initial.action === 'search') setQuery(String(initial.value || ''))
+    if (!ownerInitial && initial.action === 'radio') setRadioRequested(true)
+    if (!ownerInitial && initial.name === 'album' && initial.id) {
       viewAlbumIdRef.current = initial.id
       setViewShell(shellFor(initial.id))
       const hit = peekAlbum(initial.id)
@@ -922,7 +935,7 @@ export default function App() {
     window.addEventListener('popstate', syncRoute)
     window.addEventListener('hashchange', syncRoute)
     return () => { window.removeEventListener('popstate', syncRoute); window.removeEventListener('hashchange', syncRoute) }
-  }, [applyRoute, loadInto, peekAlbum, shellFor])
+  }, [applyRoute, loadInto, peekAlbum, shellFor, isAdmin])
 
   useEffect(() => {
     const bb = tg?.BackButton
@@ -1134,6 +1147,49 @@ export default function App() {
     haptic()
   }, [current, queue.length, isPlaying, requestPlay, startRadio, haptic])
 
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    const session = navigator.mediaSession
+
+    if (current && playerAlbum) {
+      const artwork = playerAlbum.cover
+        ? [{ src: playerAlbum.cover, sizes: '512x512', type: 'image/jpeg' }]
+        : []
+      try {
+        session.metadata = new MediaMetadata({
+          title: current.title,
+          artist: asText(playerAlbum.creator) || 'Nenormalizm Recs',
+          album: stripCatalog(playerAlbum.title) || playerAlbum.identifier,
+          artwork,
+        })
+      } catch {}
+    } else {
+      session.metadata = null
+    }
+    session.playbackState = isPlaying ? 'playing' : 'paused'
+
+    const handlers = [
+      ['play', () => { if (!isPlaying) togglePlay() }],
+      ['pause', () => { if (isPlaying) togglePlay() }],
+      ['previoustrack', playPrev],
+      ['nexttrack', playNext],
+      ['seekto', (details) => {
+        if (!Number.isFinite(details.seekTime) || !audioRef.current) return
+        audioRef.current.currentTime = details.seekTime
+        setCurrentTime(details.seekTime)
+      }],
+    ]
+    handlers.forEach(([action, handler]) => {
+      try { session.setActionHandler(action, handler) } catch {}
+    })
+
+    return () => {
+      handlers.forEach(([action]) => {
+        try { session.setActionHandler(action, null) } catch {}
+      })
+    }
+  }, [current, playerAlbum, isPlaying, togglePlay, playPrev, playNext])
+
   const toggleShuffle = useCallback(() => {
     setShuffle((s) => {
       const next = !s
@@ -1268,7 +1324,7 @@ export default function App() {
   }, [toast])
 
   useEffect(() => { const a = audioRef.current; if (a) a.volume = muted ? 0 : volume }, [volume, muted, current])
-  useEffect(() => { setCurrentTime(0); setBuffered(0); setDuration(current?.duration || 0); listenTick.current = null }, [current?.key])
+  useEffect(() => { setCurrentTime(0); setBuffered(0); setDuration(current?.duration || 0); listenTick.current = null }, [current?.key, current?.duration])
 
   const onCanPlay = () => {
     const a = audioRef.current
@@ -1658,7 +1714,7 @@ export default function App() {
             <div className="album-bar">
               <div className="wrap album-bar-in">
                 <button className="back-btn" onClick={goBack}><IBack size={17} /> Назад к каталогу</button>
-                <button className="bar-logo" onClick={goHome} aria-label="В каталог"><Logo h={28} playing={isPlaying} /></button>
+                <button className="bar-logo" onClick={goHome} aria-label="В каталог"><Logo h={32} playing={isPlaying} /></button>
                 <span className="crumb">Библиотека / {catalogOf(activeAlbum)}</span>
                 <div className="bar-actions">
                   <button className="icon-btn" onClick={() => shareAlbum(activeAlbum)} aria-label="Скопировать ссылку на релиз" title="Скопировать ссылку">
