@@ -1150,43 +1150,48 @@ export default function App() {
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     const session = navigator.mediaSession
+    if (!session || typeof session.setActionHandler !== 'function') return
 
-    if (current && playerAlbum) {
-      const artwork = playerAlbum.cover
-        ? [{ src: playerAlbum.cover, sizes: '512x512', type: 'image/jpeg' }]
-        : []
-      try {
+    try {
+      if (current && playerAlbum && typeof MediaMetadata !== 'undefined') {
+        const artwork = playerAlbum.cover
+          ? [{ src: playerAlbum.cover, sizes: '512x512', type: 'image/jpeg' }]
+          : []
         session.metadata = new MediaMetadata({
           title: current.title,
           artist: asText(playerAlbum.creator) || 'Nenormalizm Recs',
           album: stripCatalog(playerAlbum.title) || playerAlbum.identifier,
           artwork,
         })
-      } catch {}
-    } else {
-      session.metadata = null
-    }
-    session.playbackState = isPlaying ? 'playing' : 'paused'
+      } else if (typeof session.metadata !== 'undefined') {
+        session.metadata = null
+      }
+      if ('playbackState' in session) {
+        session.playbackState = isPlaying ? 'playing' : 'paused'
+      }
 
-    const handlers = [
-      ['play', () => { if (!isPlaying) togglePlay() }],
-      ['pause', () => { if (isPlaying) togglePlay() }],
-      ['previoustrack', playPrev],
-      ['nexttrack', playNext],
-      ['seekto', (details) => {
-        if (!Number.isFinite(details.seekTime) || !audioRef.current) return
-        audioRef.current.currentTime = details.seekTime
-        setCurrentTime(details.seekTime)
-      }],
-    ]
-    handlers.forEach(([action, handler]) => {
-      try { session.setActionHandler(action, handler) } catch {}
-    })
-
-    return () => {
-      handlers.forEach(([action]) => {
-        try { session.setActionHandler(action, null) } catch {}
+      const handlers = [
+        ['play', () => { if (!isPlaying) togglePlay() }],
+        ['pause', () => { if (isPlaying) togglePlay() }],
+        ['previoustrack', playPrev],
+        ['nexttrack', playNext],
+        ['seekto', (details) => {
+          if (!Number.isFinite(details.seekTime) || !audioRef.current) return
+          try { audioRef.current.currentTime = details.seekTime } catch {}
+          setCurrentTime(details.seekTime)
+        }],
+      ]
+      handlers.forEach(([action, handler]) => {
+        try { session.setActionHandler(action, handler) } catch {}
       })
+
+      return () => {
+        handlers.forEach(([action]) => {
+          try { session.setActionHandler(action, null) } catch {}
+        })
+      }
+    } catch {
+      return
     }
   }, [current, playerAlbum, isPlaying, togglePlay, playPrev, playNext])
 
