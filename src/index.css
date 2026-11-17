@@ -685,6 +685,8 @@ body {
 .toast .t-act:hover { text-decoration: underline; }
 
 /* ---------- планшет ---------- */
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 99px; border: 1px solid var(--border-strong); background: var(--surface-2); font-size: 10.5px; font-family: var(--mono); color: var(--muted); margin-right: 6px; margin-bottom: 4px; }
+
 @media (max-width: 900px) {
   .toolbar-grid {
     grid-template-columns: auto minmax(0, 1fr) auto auto auto;

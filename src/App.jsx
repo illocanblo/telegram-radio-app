@@ -691,14 +691,14 @@ export default function App() {
       const or = UPLOADER_EMAILS.map((e) => `uploader:"${e}"`).join(' OR ')
       const p = new URLSearchParams()
       p.set('q', `(${or}) AND mediatype:"audio"`)
-      ;['identifier', 'title', 'creator', 'date', 'publicdate', 'mediatype'].forEach((f) => p.append('fl[]', f))
+      ;['identifier', 'title', 'creator', 'date', 'publicdate', 'mediatype', 'subject'].forEach((f) => p.append('fl[]', f))
       p.append('sort[]', 'publicdate desc'); p.set('rows', '300'); p.set('output', 'json')
       const res = await fetch(`https://archive.org/advancedsearch.php?${p.toString().replace(/\+/g, '%20')}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       const docs = data?.response?.docs
       if (!Array.isArray(docs)) throw new Error('Некорректный ответ архива')
-      const clean = docs.filter((d) => d && d.identifier)
+      const clean = docs.filter((d) => d && d.identifier).map((d) => ({ ...d, subject: asArray(d.subject || '') }))
       setAlbums(clean)
       writeLS(K.library, { ts: Date.now(), albums: clean })
       if (!clean.length) setLibError('Архив не вернул ни одного релиза.')
@@ -948,7 +948,7 @@ export default function App() {
     let list = visibleAlbums
     if (favOnly) list = list.filter((a) => favs.has(a.identifier))
     if (era !== 'all') list = list.filter((a) => decadeOf(a) === Number(era))
-    if (q) list = list.filter((a) => [a.title, a.creator, a.identifier, catalogOf(a)].filter(Boolean).join(' ').toLowerCase().includes(q))
+    if (q) list = list.filter((a) => [a.title, a.creator, a.identifier, catalogOf(a), ...(a.subject || [])].filter(Boolean).join(' ').toLowerCase().includes(q))
     const byDate = (a) => String(a.date || a.publicdate || '')
     const sorted = [...list]
     if (sort === 'new') sorted.sort((a, b) => byDate(b).localeCompare(byDate(a)))
@@ -1486,7 +1486,7 @@ export default function App() {
                     enterKeyHint="search"
                     autoComplete="off"
                     spellCheck="false"
-                    placeholder="Поиск: релиз, артист, каталог…"
+                    placeholder="Поиск: релиз, артист, каталог, теги…"
                     aria-label="Поиск по каталогу"
                   />
                   {query
@@ -1606,6 +1606,13 @@ export default function App() {
                           <div className="card-cat">{catalogOf(a)}{yearOf(a) ? ` · ${yearOf(a)}` : ''}</div>
                           <div className="card-title">{stripCatalog(a.title) || a.identifier}</div>
                           <div className="card-artist">{asText(a.creator) || 'Various Artists'}</div>
+                          {a.subject?.length && (
+                            <div className="card-tags">
+                              {a.subject.slice(0, 4).map((tag) => (
+                                <span key={tag} className="tag-chip">{tag}</span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div className="card-meta">
                           <button className={cx('icon-btn', 'ghost', 'list-fav')} style={fav ? { color: 'var(--magenta)' } : undefined} onClick={(e) => { e.stopPropagation(); toggleFav(a.identifier) }} aria-label={fav ? 'Убрать из избранного' : 'В избранное'}>
