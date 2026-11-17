@@ -76,32 +76,25 @@ export default function Logo({ h = 44, playing = false, className = '' }) {
     return () => { alive = false }
   }, [])
 
+  // Only render the SVG icon when it's large enough to stay readable.
+  // Below 32px the SVG details become unreadable — hide it entirely instead.
+  const readable = h >= 32
+  if (!readable) return null
+
   const cls = ['logo', playing ? 'is-playing' : '', className].filter(Boolean).join(' ')
   const style = { '--logo-h': `${h}px` }
-
-  // Responsive text fallback based on logo height
-  let logoText = ''
-  if (h >= 40) logoText = 'Nenormalizm Recs'
-  else if (h >= 30) logoText = 'Nenorma'
-  else logoText = 'NR'
 
   if (typeof markup === 'string') {
     return (
       <span className={cls} style={style} role="img" aria-label="Nenormalizm Recs">
         <span className="logo-mark" dangerouslySetInnerHTML={{ __html: markup }} />
-        {logoText && <span className="logo-text">{logoText}</span>}
         <span className="logo-dot" aria-hidden="true" />
       </span>
     )
   }
 
   if (markup === null && imgFailed) {
-    return (
-      <span className={['logo-word', className].filter(Boolean).join(' ')} style={style}>
-        <b>NENORMALIZM</b>
-        <i>RECS</i>
-      </span>
-    )
+    return null
   }
 
   return (
@@ -109,7 +102,6 @@ export default function Logo({ h = 44, playing = false, className = '' }) {
       <span className="logo-mark">
         <img src={LOGO_SRC} alt="" loading="eager" decoding="async" draggable="false" onError={() => setImgFailed(true)} />
       </span>
-      {logoText && <span className="logo-text">{logoText}</span>}
       <span className="logo-dot" aria-hidden="true" />
     </span>
   )
