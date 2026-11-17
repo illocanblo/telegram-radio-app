@@ -442,6 +442,8 @@ export default function App() {
   const [viewShell, setViewShell] = useState(null)
   const [viewAlbum, setViewAlbum] = useState(null)
   const [viewTracks, setViewTracks] = useState([])
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminChecked, setAdminChecked] = useState(false)
   const [albumLoading, setAlbumLoading] = useState(false)
   const [albumError, setAlbumError] = useState('')
   const [descOpen, setDescOpen] = useState(false)
@@ -595,6 +597,38 @@ export default function App() {
     const meta = document.querySelector('meta[name="theme-color"]')
     if (meta) meta.setAttribute('content', bg)
   }, [theme])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const hash = window.location.hash.replace(/^#/, '')
+      const [, qs] = hash.split('?')
+      const params = new URLSearchParams(qs || '')
+      const key = params.get('k')
+
+      if (key && !adminChecked) {
+        try {
+          const res = await fetch(`/api/verify-admin?k=${encodeURIComponent(key)}`, {
+            cache: 'no-store',
+          })
+          const data = await res.json()
+          if (alive && data.valid) {
+            setIsAdmin(true)
+            try { sessionStorage.setItem('nr.admin.valid', '1') } catch {}
+          }
+        } catch {}
+        setAdminChecked(true)
+      } else if (!key && !adminChecked) {
+        // Check sessionStorage for previously validated admin session
+        try {
+          const saved = sessionStorage.getItem('nr.admin.valid')
+          if (alive && saved === '1') setIsAdmin(true)
+        } catch {}
+        setAdminChecked(true)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
 
   useEffect(() => {
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
@@ -792,6 +826,14 @@ export default function App() {
 
   const applyRoute = useCallback((next) => {
     routeRef.current = next
+
+    if ((next.name === 'stats' || next.name === 'links') && !isAdmin) {
+      setRoute({ name: 'library', id: null })
+      writeRoute({ name: 'library', id: null }, { replace: true, depth: 0 })
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      return
+    }
+
     setRoute(next)
 
     if (next.name === 'album' && next.id) {
@@ -818,7 +860,7 @@ export default function App() {
       }
     }
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  }, [shellFor, peekAlbum, loadInto])
+  }, [shellFor, peekAlbum, loadInto, isAdmin])
 
   const navigate = useCallback((next, { replace = false } = {}) => {
     if (!replace) depth.current += 1
@@ -1589,12 +1631,16 @@ export default function App() {
                     {fullscreen ? <><ICollapse size={14} /> Обычный режим</> : <><IExpand size={14} /> Полный экран</>}
                   </button>
                 )}
-                <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'links', id: null })}>
-                  <ILink size={14} /> Ссылки
-                </button>
-                <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'stats', id: null })}>
-                  <IChart size={14} /> Статистика
-                </button>
+                {isAdmin && (
+                  <>
+                    <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'links', id: null })} title="Ссылки">
+                      <ILink size={14} /> Ссылки
+                    </button>
+                    <button className="btn btn-quiet" style={{ height: 32, padding: '0 12px', fontSize: 12.5 }} onClick={() => navigate({ name: 'stats', id: null })} title="Статистика">
+                      <IChart size={14} /> Статистика
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </>

@@ -620,17 +620,16 @@ body {
 .p-seek-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .p-time { font-family: var(--mono); font-size: 11px; color: var(--dim); min-width: 32px; flex: 0 0 auto; }
 .p-time.right { text-align: right; }
-.seek { position: relative; flex: 1 1 auto; height: 20px; display: flex; align-items: center; cursor: pointer; touch-action: none; min-width: 0; }
-.seek-track { position: absolute; left: 0; right: 0; height: 4px; border-radius: 99px; background: var(--ink-600); overflow: hidden; }
+.seek { position: relative; flex: 1 1 auto; height: 44px; display: flex; align-items: center; cursor: pointer; touch-action: none; min-width: 0; padding: 12px 0; }
+.seek-track { position: absolute; left: 0; right: 0; height: 8px; border-radius: 99px; background: var(--ink-600); overflow: hidden; }
 .seek-buf { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink-500); }
 .seek-fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--cyan), var(--acid)); }
-.seek-knob { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%) scale(0); transition: transform 0.15s var(--ease); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
-.seek:hover .seek-knob, .seek:focus-visible .seek-knob, .seek.drag .seek-knob { transform: translate(-50%, -50%) scale(1); }
-.seek:hover .seek-track { height: 6px; }
+.seek-knob { position: absolute; top: 50%; width: 24px; height: 24px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+.seek:focus-visible .seek-knob, .seek.drag .seek-knob { transform: translate(-50%, -50%) scale(1.1); }
 
-.p-right { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; flex: none; }
+.p-right { display: flex; align-items: center; justify-content: flex-end; gap: 14px; min-width: 0; flex: none; }
 .vol { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.vol input[type='range'] { -webkit-appearance: none; appearance: none; width: 84px; height: 4px; border-radius: 99px; background: var(--ink-600); outline: none; cursor: pointer; }
+.vol input[type='range'] { -webkit-appearance: none; appearance: none; width: 96px; height: 4px; border-radius: 99px; background: var(--ink-600); outline: none; cursor: pointer; }
 .vol input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--text); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); transition: transform 0.14s; }
 .vol input[type='range']::-webkit-slider-thumb:hover { transform: scale(1.25); background: var(--acid); }
 .vol input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--text); cursor: pointer; }
@@ -778,6 +777,8 @@ body {
   .btn:hover, .icon-btn:hover, .chip:hover { transform: none; }
   .search-kbd { display: none; }
 }
+
+.logo-text { margin-left: 8px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; font-size: 12.5px; color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
