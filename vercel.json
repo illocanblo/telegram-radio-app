@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/telegram.js": {
+      "maxDuration": 20
+    }
+  },
   "rewrites": [
     { "source": "/api/verify-admin", "destination": "/api/config" }
   ]
