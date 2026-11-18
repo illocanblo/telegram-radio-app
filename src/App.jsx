@@ -3,6 +3,7 @@ import Logo from './Logo.jsx'
 import Stats from './Stats.jsx'
 import Links from './Links.jsx'
 import { analytics } from './analytics.js'
+import { bindMediaSession } from './mediasession.js'
 import {
   readStartParam, routeFromParam, filtersForDeepLink, readRoute, writeRoute,
   paramForAlbum, directLink, webLink, getLinkConfig, copyText,
@@ -448,6 +449,8 @@ export default function App() {
   const [dragOver, setDragOver] = useState(null)
 
   const audioRef = useRef(null)
+  const mediaSessionState = useRef(null)
+  const mediaSessionControls = useRef(null)
   const playerRef = useRef(null)
   const seekRef = useRef(null)
   const searchRef = useRef(null)
@@ -1155,53 +1158,51 @@ export default function App() {
     haptic()
   }, [current, queue.length, isPlaying, requestPlay, startRadio, haptic])
 
+  const stopPlayback = useCallback(() => {
+    wantPlay.current = false
+    setBuffering(false)
+    const audio = audioRef.current
+    audio?.pause()
+    if (audio) audio.currentTime = 0
+    setCurrentTime(0)
+    listenTick.current = 0
+  }, [])
+
+  mediaSessionState.current = () => current ? {
+    title: current.title,
+    artist: asText(playerAlbum?.creator) || stripCatalog(playerAlbum?.title) || 'Nenormalizm Recs',
+    album: playerAlbum ? stripCatalog(playerAlbum.title) : 'Nenormalizm Recs',
+    artwork: playerAlbum?.cover || '',
+  } : null
+  mediaSessionControls.current = { isPlaying, togglePlay, stopPlayback, playPrev, playNext }
+
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return
-    const session = navigator.mediaSession
-    if (!session || typeof session.setActionHandler !== 'function') return
-
-    try {
-      if (current && playerAlbum && typeof MediaMetadata !== 'undefined') {
-        const artwork = playerAlbum.cover
-          ? [{ src: playerAlbum.cover, sizes: '512x512', type: 'image/jpeg' }]
-          : []
-        session.metadata = new MediaMetadata({
-          title: current.title,
-          artist: asText(playerAlbum.creator) || 'Nenormalizm Recs',
-          album: stripCatalog(playerAlbum.title) || playerAlbum.identifier,
-          artwork,
-        })
-      } else if (typeof session.metadata !== 'undefined') {
-        session.metadata = null
-      }
-      if ('playbackState' in session) {
-        session.playbackState = isPlaying ? 'playing' : 'paused'
-      }
-
-      const handlers = [
-        ['play', () => { if (!isPlaying) togglePlay() }],
-        ['pause', () => { if (isPlaying) togglePlay() }],
-        ['previoustrack', playPrev],
-        ['nexttrack', playNext],
-        ['seekto', (details) => {
-          if (!Number.isFinite(details.seekTime) || !audioRef.current) return
-          try { audioRef.current.currentTime = details.seekTime } catch {}
-          setCurrentTime(details.seekTime)
-        }],
-      ]
-      handlers.forEach(([action, handler]) => {
-        try { session.setActionHandler(action, handler) } catch {}
-      })
-
-      return () => {
-        handlers.forEach(([action]) => {
-          try { session.setActionHandler(action, null) } catch {}
-        })
-      }
-    } catch {
-      return
-    }
-  }, [current, playerAlbum, isPlaying, togglePlay, playPrev, playNext])
+    const audio = audioRef.current
+    if (!audio) return
+    return bindMediaSession({
+      audio,
+      getState: () => mediaSessionState.current?.() || null,
+      onPlay: () => {
+        const controls = mediaSessionControls.current
+        if (!controls?.isPlaying) controls?.togglePlay()
+      },
+      onPause: () => {
+        const controls = mediaSessionControls.current
+        if (controls?.isPlaying) controls.togglePlay()
+      },
+      onStop: () => mediaSessionControls.current?.stopPlayback(),
+      onPrev: () => mediaSessionControls.current?.playPrev(),
+      onNext: () => mediaSessionControls.current?.playNext(),
+      onSeek: (position) => {
+        const target = audioRef.current
+        if (!target || !Number.isFinite(position)) return
+        target.currentTime = position
+        setCurrentTime(position)
+        listenTick.current = position
+        analytics.event('seek')
+      },
+    })
+  }, [])
 
   const toggleShuffle = useCallback(() => {
     setShuffle((s) => {

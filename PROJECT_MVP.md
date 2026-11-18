@@ -99,7 +99,7 @@ archive.org only: `advancedsearch.php`, `metadata/{id}`, `services/img/{id}`, `d
 | 3b | `max-width: min(46%, 240px)` on logo is circular (percentage of auto-width parent); `force-cache` makes logo updates stick forever; no text fallback when SVG missing | **OPEN** |
 | 4 | Maintainability: giant `App.jsx`, no tests, lint warnings | **OPEN** |
 | 5 | Starter `README.md` and `src/App.css` leftovers | **OPEN** |
-| 6 | New/minor: IntersectionObserver prefetch deps stale after sort change; invalid `role="listitem button"` on track rows; sort-menu footer claims cross-device save unconditionally; no React error boundary; no MediaSession metadata | **OPEN** |
+| 6 | New/minor: IntersectionObserver prefetch deps stale after sort change; invalid `role="listitem button"` on track rows; sort-menu footer claims cross-device save unconditionally; no React error boundary | **OPEN** — MediaSession metadata and lock-screen controls implemented |
 
 None of these block listening. Items 1, 2, 2b block *trusted* sharing of owner links.
 
@@ -160,7 +160,7 @@ None of these block listening. Items 1, 2, 2b block *trusted* sharing of owner l
 ### Later (post-launch waves)
 8. Vitest units for deeplink, track building, parsing, sync chunking; CI on PR.
 9. Extract hooks (`useCatalog`, `usePlayer`, `useAlbumMeta`, `useRoute`, `useTelegramChrome`).
-10. MediaSession metadata + lock-screen controls; prefetch dependency fix; ARIA role cleanup; README and starter-file cleanup.
+10. MediaSession metadata + lock-screen controls (**implemented**); prefetch dependency fix; ARIA role cleanup; README and starter-file cleanup.
 
 ---
 
