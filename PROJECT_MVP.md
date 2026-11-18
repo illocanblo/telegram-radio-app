@@ -9,7 +9,7 @@
 
 Nenormalizm Recs is a React 19 single-page application with optional Vercel serverless endpoints. It works both as a regular web app and as a Telegram Mini App. It presents the label's archive hosted on archive.org as a browsable catalogue with a persistent radio-style player, and gives the owner privacy-respecting aggregate statistics and a deep-link generator behind an admin key.
 
-**MVP verdict: READY for first daily users**, with a short pre-launch hygiene list (Section 8). The runtime architecture is strong enough: static stateless frontend, cache-first data access, graceful degradation on every external failure, and a minimal batched write path. The weakest links are maintainability (a single ~2,000-line component, no automated tests) and secret hygiene — iteration risks, not runtime risks.
+**MVP verdict: READY for first daily users**, with a short pre-launch hygiene list (Section 8). The runtime architecture is strong enough: static stateless frontend, cache-first data access, graceful degradation on every external failure, and a minimal batched write path. The weakest links are maintainability (a single ~2,000-line component and limited automated test coverage) and secret hygiene — iteration risks, not runtime risks.
 
 ---
 
@@ -81,9 +81,9 @@ archive.org only: `advancedsearch.php`, `metadata/{id}`, `services/img/{id}`, `d
 
 ## 4. Current health
 
-- `npm run build`: passes. Main JS ~344 KB raw / ~106 KB gzip; CSS ~38 KB / ~9 KB gzip.
-- `npm run lint`: passes with warnings (hook dependencies, render-time ref reads, no-effect expressions).
-- No test script or test files.
+- `npm run build`: passes. Current main JS ~350 KB raw / ~107 KB gzip; CSS ~39 KB / ~9 KB gzip.
+- `npm run lint`: passes with existing warnings (render-time ref reads, set-state-in-effect and no-effect expressions).
+- `npm test`: passes; focused unit tests cover deep links, Telegram helpers/API, Media Session and album metadata cache.
 - Changes since the previous review: admin gating with footer buttons, tag search and card tag chips, seek hit-area redesigned to 44 px with always-visible knob, volume/queue spacing fixed, logo suppressed below 32 px.
 
 ---
@@ -92,16 +92,16 @@ archive.org only: `advancedsearch.php`, `metadata/{id}`, `services/img/{id}`, `d
 
 | # | Item | Status |
 |---|---|---|
-| 1 | `src/statskey.txt` tracked in git | **IN REMEDIATION** — file removed and ignored; rotate live credentials and purge history if needed |
-| 2 | Admin key sent as query parameter | **FIXED** — verification uses POST plus `X-Admin-Key`/body and strips `k` after success |
-| 2b | Initial deep link to `#/stats` / `#/links` renders owner view before/without admin check (render is not gated, only navigation) | **FIXED** — owner routes are deferred until validation |
+| 1 | `src/statskey.txt` in Git history | **FIXED LOCALLY** — historical path removed from rewritten history; local root `statskey.txt` is ignored and retained. Rotate the credential if it was ever active; old clones/forks may retain it. |
+| 2 | Admin key sent as query parameter | **FIXED** — verification uses POST plus `X-Admin-Key`; `k` is removed from the URL before the request |
+| 2b | Initial deep link to `#/stats` / `#/links` renders owner view before/without admin check | **FIXED** — owner components are render-gated and initial owner routes wait for validation |
 | 3 | Album-bar logo invisible (`h={28}` vs 32 px threshold) → empty button | **FIXED** — call site uses 32 px and component no longer suppresses valid sizes |
 | 3b | `max-width: min(46%, 240px)` on logo is circular (percentage of auto-width parent); `force-cache` makes logo updates stick forever; no text fallback when SVG missing | **OPEN** |
 | 4 | Maintainability: giant `App.jsx`, no tests, lint warnings | **OPEN** |
-| 5 | Starter `README.md` and `src/App.css` leftovers | **OPEN** |
-| 6 | New/minor: IntersectionObserver prefetch deps stale after sort change; invalid `role="listitem button"` on track rows; sort-menu footer claims cross-device save unconditionally; no React error boundary | **OPEN** — MediaSession metadata and lock-screen controls implemented |
+| 5 | Project setup and integration documentation | **FIXED** — README describes the app; archive.org guide is under `docs/`; `src/App.css` is absent |
+| 6 | Prefetch dependencies, track-row semantics, sort-menu behavior, and error boundary | **FIXED** — Media Session is implemented on a best-effort basis; Android background playback and lock-screen controls still require device verification and cannot be guaranteed by a Mini App |
 
-None of these block listening. Items 1, 2, 2b block *trusted* sharing of owner links.
+None of these block listening. Credential rotation and real-device background playback remain operational follow-ups.
 
 ---
 
@@ -119,7 +119,7 @@ None of these block listening. Items 1, 2, 2b block *trusted* sharing of owner l
 6. **Recovery built in.** Resume position, queue undo, session restore, cloud sync — daily-use friction points are already handled.
 
 ### Where it is not "strong" yet (and why that is acceptable for MVP)
-- **Iteration safety, not runtime safety:** one giant component plus zero tests means every change is a manual regression sweep. Fine for a stable launch build; becomes expensive once user feedback drives weekly changes.
+- **Iteration safety, not runtime safety:** one giant component and limited test coverage mean changes still need careful regression testing.
 - **No monitoring:** failures surface via users. `/api/diag` plus Vercel logs are enough for the first weeks; add a scheduled health probe later.
 - **Single external dependency:** archive.org availability and response shapes. Mitigated by caching and error states, but an upstream format change would need a code fix. Acceptable and unavoidable for this content source.
 - **Browser storage eviction:** Safari may purge `localStorage` after ~7 days of no interaction; favorites/resume would reset for dormant web users. Telegram users are covered by CloudStorage sync. Acceptable for MVP.
@@ -139,7 +139,7 @@ None of these block listening. Items 1, 2, 2b block *trusted* sharing of owner l
 | Secret leak via tracked file or URL | Medium | High | Rotate + purge (item 1); stop sharing owner links with `?k=` | POST transport, distinct keys |
 | archive.org outage/shape change | Low–Medium | Medium | Cache + error states + retry | Server-side proxy with schema pinning |
 | Regression from untested refactor | Medium | Medium | Freeze refactors until launch stabilizes | Vitest units + CI |
-| Render crash white-screens app | Low | High | — | React error boundary with retry (add pre-launch) |
+| Render crash white-screens app | Low | High | Top-level React error boundary | Keep adding focused regression tests |
 | Storage quota/eviction | Low | Low | LRU purge already in place | CloudStorage expansion |
 
 ---
@@ -147,20 +147,18 @@ None of these block listening. Items 1, 2, 2b block *trusted* sharing of owner l
 ## 8. Pre-launch checklist
 
 ### Must (before first users)
-1. Confirm `src/statskey.txt`; rotate keys if live; remove file and purge history; add to `.gitignore`.
-2. Add a top-level React error boundary with a retry button (prevents white-screen on unexpected render errors).
-3. Verify Vercel env: `TELEMETRY`, `STATS_KEY`, `ADMIN_KEY`, `UPSTASH_REST_URL`, `UPSTASH_REST_TOKEN`.
-4. Smoke test matrix: Telegram iOS + Android (portrait, album open, play, resume, download), desktop Chrome/Firefox, light theme, DNT on/off.
+1. Rotate any credential that was ever stored in the removed historical file.
+2. Verify production Vercel env values and Node.js 22.x in project settings.
+3. Smoke test Telegram Android/iOS, desktop Chrome/Firefox, light theme, and DNT on/off.
 
 ### Should (first week)
-5. Gate the initial render of `stats`/`links` on the resolved admin check (or defer initial route).
-6. Move admin verification to POST/header; strip `?k=` from the URL after success.
-7. Album-bar logo: raise call site to ≥ 32 px or lower threshold; fix circular `max-width`; add text fallback; version the logo fetch.
+4. Test owner deep links with a valid and invalid key; verify the URL is scrubbed.
+5. On Android, test Media Session controls and screen-off playback in the actual Telegram client; report unsupported behavior as a client/OS limitation.
 
 ### Later (post-launch waves)
 8. Vitest units for deeplink, track building, parsing, sync chunking; CI on PR.
 9. Extract hooks (`useCatalog`, `usePlayer`, `useAlbumMeta`, `useRoute`, `useTelegramChrome`).
-10. MediaSession metadata + lock-screen controls (**implemented**); prefetch dependency fix; ARIA role cleanup; README and starter-file cleanup.
+10. Media Session metadata and controls are implemented, but platform presentation and background playback remain best effort.
 
 ---
 

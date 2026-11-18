@@ -79,8 +79,9 @@ You --POST + x-admin-key--> /api/telegram-setup --> Bot API
 public HTTP endpoint. `lib/telegram.js` holds the token logic and must not be
 reachable from the internet. Same reasoning as your existing `lib/redis.js`.
 
-**Runtime:** Node 18+ (`AbortSignal.timeout`). If the project is pinned to Node 16,
-raise it in Project Settings -> Node.js Version.
+**Runtime:** Vite 8 requires Node 20.19+ or 22.12+. Use Node 22.x in Vercel
+Project Settings -> Node.js Version. The serverless helpers also use
+`AbortSignal.timeout` (available in Node 18+).
 
 ---
 

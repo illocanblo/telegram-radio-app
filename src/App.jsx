@@ -4,6 +4,7 @@ import Stats from './Stats.jsx'
 import Links from './Links.jsx'
 import { analytics } from './analytics.js'
 import { bindMediaSession } from './mediasession.js'
+import { META_VER, parseStoredMeta } from './albumMetaCache.js'
 import {
   readStartParam, routeFromParam, filtersForDeepLink, readRoute, writeRoute,
   paramForAlbum, directLink, webLink, getLinkConfig, copyText,
@@ -28,10 +29,8 @@ const K = {
   hidden: 'nr.hidden.v1', session: 'nr.session.v1', played: 'nr.played.v1',
 }
 const PLAYED_MAX = 600
-const META_TTL = 6 * 60 * 60 * 1000
 const META_MAX = 40
 const META_IDX = 'nr.meta.idx'
-const META_VER = 1
 const FETCH_TIMEOUT = 12000
 const PREFETCH_CONCURRENCY = 2
 const PREFETCH_AUTO_MAX = 6
@@ -48,11 +47,7 @@ function writeLS(key, value) {
 
 function readStoredMeta(id) {
   try {
-    const raw = sessionStorage.getItem(metaKey(id))
-    if (!raw) return null
-    const p = JSON.parse(raw)
-    if (!p || p.v !== META_VER || Date.now() - (p.ts || 0) > META_TTL) return null
-    return p.d || null
+    return parseStoredMeta(sessionStorage.getItem(metaKey(id)))
   } catch { return null }
 }
 
@@ -283,7 +278,7 @@ function TrackSkeletons({ n = 6 }) {
   return (
     <div role="list" aria-hidden="true">
       {Array.from({ length: n }).map((_, i) => (
-        <div className="track" key={i} style={{ cursor: 'default' }}>
+        <div className="track track-skeleton" key={i}>
           <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
           <span className="sk sk-line" style={{ margin: 0, width: `${58 + ((i * 13) % 34)}%` }} />
           <span className="t-fmt" style={{ opacity: 0.35 }}>MP3</span>
@@ -295,7 +290,7 @@ function TrackSkeletons({ n = 6 }) {
   )
 }
 
-function SortMenu({ value, options, onChange, open, onOpenChange, count }) {
+function SortMenu({ value, options, onChange, open, onOpenChange, count, syncEnabled }) {
   const wrapRef = useRef(null)
   const btnRef = useRef(null)
   const itemRefs = useRef([])
@@ -348,6 +343,9 @@ function SortMenu({ value, options, onChange, open, onOpenChange, count }) {
         aria-label={`Сортировка: ${active.label}`}
         onClick={() => onOpenChange(!open)}
         onKeyDown={(e) => {
+          if (e.key === 'Escape' && open) {
+            e.preventDefault(); e.stopPropagation(); close(); return
+          }
           if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
             e.preventDefault(); e.stopPropagation(); onOpenChange(true)
           }
@@ -385,7 +383,9 @@ function SortMenu({ value, options, onChange, open, onOpenChange, count }) {
             ))}
           </div>
           <div className="sortmenu-foot">
-            <ICloud size={13} /> выбор сохраняется между устройствами
+            {syncEnabled
+              ? <><ICloud size={13} /> выбор сохраняется между устройствами</>
+              : <>выбор сохраняется на этом устройстве</>}
           </div>
         </div>
       )}
@@ -429,6 +429,7 @@ export default function App() {
   const [viewAlbum, setViewAlbum] = useState(null)
   const [viewTracks, setViewTracks] = useState([])
   const [isAdmin, setIsAdmin] = useState(false)
+  const adminVerified = useRef(false)
   const [albumLoading, setAlbumLoading] = useState(false)
   const [albumError, setAlbumError] = useState('')
   const [descOpen, setDescOpen] = useState(false)
@@ -589,20 +590,30 @@ export default function App() {
     let alive = true
     ;(async () => {
       const hash = window.location.hash.replace(/^#/, '')
-      const [, qs] = hash.split('?')
-      const params = new URLSearchParams(qs || '')
+      const separator = hash.indexOf('?')
+      const hashPrefix = separator < 0 ? '' : hash.slice(0, separator)
+      const qs = separator < 0 ? hash : hash.slice(separator + 1)
+      const params = new URLSearchParams(qs)
       const key = params.get('k')
 
       if (key) {
+        params.delete('k')
+        const remaining = params.toString()
+        const cleanHash = separator < 0
+          ? remaining
+          : `${hashPrefix}${remaining ? `?${remaining}` : ''}`
+        const cleanUrl = window.location.pathname + window.location.search + (cleanHash ? `#${cleanHash}` : '')
+        window.history.replaceState(window.history.state, '', cleanUrl)
+
         try {
           const res = await fetch('/api/verify-admin', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key },
-            body: JSON.stringify({ key }),
+            headers: { 'X-Admin-Key': key },
             cache: 'no-store',
           })
           const data = await res.json()
           if (alive && data.valid) {
+            adminVerified.current = true
             setIsAdmin(true)
             try { sessionStorage.setItem('nr.admin.valid', '1') } catch {}
             const p = pendingOwnerRoute.current
@@ -611,13 +622,6 @@ export default function App() {
               setRoute(p)
               writeRoute(p, { replace: true, depth: 1 })
             }
-            try {
-              const nextParams = new URLSearchParams(qs || '')
-              nextParams.delete('k')
-              const suffix = nextParams.toString()
-              const nextUrl = window.location.pathname + window.location.search + (suffix ? '#' + suffix : '')
-              window.history.replaceState(window.history.state, '', nextUrl)
-            } catch {}
           }
         } catch {}
       } else {
@@ -625,6 +629,7 @@ export default function App() {
         try {
           const saved = sessionStorage.getItem('nr.admin.valid')
           if (alive && saved === '1') {
+            adminVerified.current = true
             setIsAdmin(true)
             const p = pendingOwnerRoute.current
             if (p) {
@@ -901,7 +906,7 @@ export default function App() {
 
     writeRoute({ name: 'library', id: null }, { replace: true, depth: 0 })
     depth.current = 0
-    const ownerInitial = (initial.name === 'stats' || initial.name === 'links') && !isAdmin
+    const ownerInitial = (initial.name === 'stats' || initial.name === 'links') && !adminVerified.current
     if (ownerInitial) {
       pendingOwnerRoute.current = initial
       routeRef.current = { name: 'library', id: null }
@@ -946,7 +951,7 @@ export default function App() {
     window.addEventListener('popstate', syncRoute)
     window.addEventListener('hashchange', syncRoute)
     return () => { window.removeEventListener('popstate', syncRoute); window.removeEventListener('hashchange', syncRoute) }
-  }, [applyRoute, loadInto, peekAlbum, shellFor, isAdmin])
+  }, [applyRoute, loadInto, peekAlbum, shellFor])
 
   useEffect(() => {
     const bb = tg?.BackButton
@@ -1002,7 +1007,7 @@ export default function App() {
       document.querySelectorAll('[data-album]').forEach((el) => io.observe(el))
     }, 900)
     return () => { clearTimeout(timer); if (io) io.disconnect() }
-  }, [view, filtered.length, prefetch])
+  }, [view, filtered, prefetch])
 
   const activeId = activeAlbum?.identifier || null
   const albumUnlocked = useMemo(() => {
@@ -1581,6 +1586,7 @@ export default function App() {
                   value={sort}
                   options={sortOptions}
                   count={filtered.length}
+                  syncEnabled={sync.enabled}
                   open={sortOpen}
                   onOpenChange={setSortOpen}
                   onChange={(v) => { setSort(v); analytics.event('filter'); haptic() }}
@@ -1783,7 +1789,7 @@ export default function App() {
                       <>
                         <span className="tag">{viewTracks.length} {pluralTracks(viewTracks.length)}</span>
                         {totalView > 0 && <span className="tag">{fmtTime(totalView)}</span>}
-                        {viewAlbum.subjects.map((s) => <span className="tag cyan" key={s}>{s}</span>)}
+                        {(viewAlbum.subjects || []).map((s) => <span className="tag cyan" key={s}>{s}</span>)}
                       </>
                     ) : (
                       <>
@@ -1852,24 +1858,23 @@ export default function App() {
                       const isCur = current?.key === t.key
                       const canDl = played.has(t.key)
                       return (
-                        <div
-                          key={t.key}
-                          role="listitem button"
-                          tabIndex={0}
-                          className="track"
-                          aria-current={isCur ? 'true' : undefined}
-                          onClick={() => playFromView(t)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); playFromView(t) } }}
-                          title={t.title}
-                        >
-                          <span className="t-num">{isCur ? <Eq paused={!isPlaying} /> : String(i + 1).padStart(2, '0')}</span>
-                          <span className="t-title">{t.title}</span>
-                          <span className="t-fmt">{FORMAT_SHORT[t.format] || t.format}</span>
-                          <span className="t-time">{t.duration ? fmtTime(t.duration) : '—'}</span>
+                        <div key={t.key} role="listitem" className="track" aria-current={isCur ? 'true' : undefined}>
+                          <button
+                            type="button"
+                            className="track-main"
+                            onClick={() => playFromView(t)}
+                            title={t.title}
+                            aria-label={`Воспроизвести ${t.title}`}
+                          >
+                            <span className="t-num">{isCur ? <Eq paused={!isPlaying} /> : String(i + 1).padStart(2, '0')}</span>
+                            <span className="t-title">{t.title}</span>
+                            <span className="t-fmt">{FORMAT_SHORT[t.format] || t.format}</span>
+                            <span className="t-time">{t.duration ? fmtTime(t.duration) : '—'}</span>
+                          </button>
                           {canDl ? (
                             <button
                               className="t-dl"
-                              onClick={(e) => { e.stopPropagation(); downloadTrack(t) }}
+                              onClick={() => downloadTrack(t)}
                               disabled={dlKey === t.key}
                               aria-label={`Скачать ${t.title}`}
                               title="Скачать трек"
@@ -1894,8 +1899,8 @@ export default function App() {
           </>
         )}
 
-        {view === 'stats' && <Stats albums={visibleAlbums} onBack={goBack} />}
-        {view === 'links' && <Links albums={visibleAlbums} onBack={goBack} currentAlbumId={activeId} />}
+        {view === 'stats' && isAdmin && <Stats albums={visibleAlbums} onBack={goBack} />}
+        {view === 'links' && isAdmin && <Links albums={visibleAlbums} onBack={goBack} currentAlbumId={activeId} />}
 
         <div className="player-spacer" aria-hidden="true" />
       </div>
