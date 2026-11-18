@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     ownerKey: 'owner-secret',
   },
   botApi: vi.fn(),
+  webAppLink: vi.fn((param) => `https://radio.example/?${param ? `nr=${param}&` : ''}tgFullscreen=1`),
 }))
 
 vi.mock('../lib/telegram.js', () => ({
@@ -17,6 +18,7 @@ vi.mock('../lib/telegram.js', () => ({
   botReady: () => true,
   safeEqual: (a, b) => a === b,
   validWebhookSecret: (secret) => /^[A-Za-z0-9_-]{1,256}$/.test(secret),
+  webAppLink: mocks.webAppLink,
   botApi: mocks.botApi,
   catalog: vi.fn(),
   searchCatalog: vi.fn(),
@@ -106,5 +108,52 @@ describe('Telegram webhook and setup endpoints', () => {
       secret_token: 'valid_webhook_secret-123',
     }))
     expect(mocks.botApi.mock.calls[0][1]).not.toHaveProperty('drop_pending_updates')
+  })
+
+  it('sets the private menu button to the fullscreen-marked app URL', async () => {
+    const res = response()
+
+    await setupHandler({
+      method: 'POST',
+      headers: { 'x-admin-key': 'owner-secret' },
+      body: { action: 'menu' },
+    }, res)
+
+    expect(res.statusCode).toBe(200)
+    expect(mocks.botApi).toHaveBeenCalledWith('setChatMenuButton', {
+      menu_button: {
+        type: 'web_app',
+        text: 'Слушать',
+        web_app: { url: 'https://radio.example/?tgFullscreen=1' },
+      },
+    })
+  })
+
+  it.each([
+    ['/help', 101, [
+      'https://radio.example/?tgFullscreen=1',
+      'https://radio.example/?nr=r&tgFullscreen=1',
+      'https://radio.example/?tgFullscreen=1',
+      'https://radio.example/?nr=f&tgFullscreen=1',
+    ]],
+    ['/radio', 102, [
+      'https://radio.example/?nr=r&tgFullscreen=1',
+      'https://radio.example/?tgFullscreen=1',
+    ]],
+    ['/favorites', 103, [
+      'https://radio.example/?nr=f&tgFullscreen=1',
+    ]],
+  ])('uses routed Web App buttons for private %s messages', async (text, chatId, expectedUrls) => {
+    const res = response()
+
+    await webhookHandler({
+      method: 'POST',
+      headers: { 'x-telegram-bot-api-secret-token': 'valid_webhook_secret-123' },
+      body: { update_id: chatId, message: { chat: { id: chatId, type: 'private' }, text } },
+    }, res)
+
+    const [, sent] = mocks.botApi.mock.calls.find(([method]) => method === 'sendMessage')
+    const buttons = sent.reply_markup.inline_keyboard.flat()
+    expect(buttons.map((button) => button.web_app.url)).toEqual(expectedUrls)
   })
 })

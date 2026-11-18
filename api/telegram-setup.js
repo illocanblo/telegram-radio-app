@@ -2,7 +2,7 @@
  * Первичная настройка бота через Bot API с проверкой ключа владельца.
  */
 
-import { tgCfg, botReady, safeEqual, validWebhookSecret, botApi } from '../lib/telegram.js'
+import { tgCfg, botReady, safeEqual, validWebhookSecret, webAppLink, botApi } from '../lib/telegram.js'
 
 const PRIVATE_COMMANDS = [
   { command: 'start', description: 'Открыть радио-архив' },
@@ -103,7 +103,7 @@ export default async function handler(req, res) {
         botApi('setMyCommands', { commands: PRIVATE_COMMANDS, scope: { type: 'all_private_chats' } }),
         botApi('setMyCommands', { commands: GROUP_COMMANDS, scope: { type: 'all_group_chats' } }),
         botApi('setChatMenuButton', {
-          menu_button: { type: 'web_app', text: 'Слушать', web_app: { url: appUrl } },
+          menu_button: { type: 'web_app', text: 'Слушать', web_app: { url: webAppLink('') } },
         }),
       ])
       const [me, webhook, commandsPrivate, commandsGroup] = await Promise.all([
@@ -147,7 +147,7 @@ export default async function handler(req, res) {
 
     if (action === 'menu') {
       const menu = await botApi('setChatMenuButton', {
-        menu_button: { type: 'web_app', text: 'Слушать', web_app: { url: appUrl } },
+        menu_button: { type: 'web_app', text: 'Слушать', web_app: { url: webAppLink('') } },
       })
       return res.status(200).json({ ok: true, webhookUrl, menu })
     }

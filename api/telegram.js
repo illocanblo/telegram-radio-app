@@ -11,7 +11,7 @@
 
 import {
   tgCfg, botReady, safeEqual, botApi, catalog, searchCatalog,
-  linkFor, albumLink, albumCardHtml, coverUrl, asText, catalogOf, yearOf,
+  linkFor, webAppLink, albumLink, albumCardHtml, coverUrl, asText, catalogOf, yearOf,
   validWebhookSecret,
   stripCatalog, escHtml,
 } from '../lib/telegram.js'
@@ -31,16 +31,20 @@ function throttled(key) {
 }
 
 const urlBtn = (text, param) => ({ text, url: linkFor(param) })
+const webAppBtn = (text, param = '') => ({ text, web_app: { url: webAppLink(param) } })
 const albumBtn = (text, id) => ({ text, url: albumLink(id) })
+const appBtn = (isPrivate, text, param) => isPrivate ? webAppBtn(text, param) : urlBtn(text, param)
 
 function mainKeyboard(isPrivate) {
   const rows = []
   if (isPrivate) {
-    const c = tgCfg()
-    rows.push([{ text: '🎧 Открыть плеер', web_app: { url: c.appUrl } }])
+    rows.push([webAppBtn('🎧 Открыть плеер')])
   }
-  rows.push([urlBtn('📻 Радио', 'r'), urlBtn('📚 Каталог', '')])
-  rows.push([urlBtn('♥ Избранное', 'f')])
+  rows.push([
+    appBtn(isPrivate, '📻 Радио', 'r'),
+    appBtn(isPrivate, '📚 Каталог', ''),
+  ])
+  rows.push([appBtn(isPrivate, '♥ Избранное', 'f')])
   return { inline_keyboard: rows }
 }
 
@@ -55,6 +59,8 @@ const HELP_PRIVATE = [
   '/find <i>запрос</i> — поиск по названию, артисту и тегам',
   '/favorites — избранное',
   '/help — эта справка',
+  '',
+  '<b>Кнопки:</b> «Открыть плеер» — архив; «Радио» — случайный релиз и непрерывное воспроизведение; «Каталог» — весь архив; «Избранное» — отмеченные релизы.',
   '',
   'В любом чате можно набрать <code>@бот запрос</code> и отправить релиз собеседнику — бота не нужно добавлять в чат.',
 ].join('\n')
@@ -102,13 +108,13 @@ async function handleCommand(message) {
 
   if (cmd === '/radio') {
     return send(chat.id, '<b>Радио</b> — случайный релиз, дальше играет весь каталог подряд.', {
-      inline_keyboard: [[urlBtn('📻 Включить радио', 'r')], [urlBtn('📚 Каталог', '')]],
+      inline_keyboard: [[appBtn(isPrivate, '📻 Включить радио', 'r')], [appBtn(isPrivate, '📚 Каталог', '')]],
     })
   }
 
   if (cmd === '/favorites') {
     return send(chat.id, '<b>Избранное</b> — релизы, отмеченные сердцем. Синхронизируется между вашими устройствами в Telegram.', {
-      inline_keyboard: [[urlBtn('♥ Открыть избранное', 'f')]],
+      inline_keyboard: [[appBtn(isPrivate, '♥ Открыть избранное', 'f')]],
     })
   }
 
@@ -119,7 +125,7 @@ async function handleCommand(message) {
     const items = await catalog()
     const found = searchCatalog(items, arg, 5)
     if (!found.length) {
-      return send(chat.id, `По запросу «${escHtml(arg)}» ничего не нашлось.`, { inline_keyboard: [[urlBtn('📚 Открыть каталог', '')]] })
+      return send(chat.id, `По запросу «${escHtml(arg)}» ничего не нашлось.`, { inline_keyboard: [[appBtn(isPrivate, '📚 Открыть каталог', '')]] })
     }
     const rows = found.map((a) => [albumBtn(`${catalogOf(a)} · ${(stripCatalog(a.title) || a.identifier).slice(0, 42)}`, a.identifier)])
     return send(chat.id, `Нашлось ${found.length} по запросу «${escHtml(arg)}»:`, { inline_keyboard: rows })

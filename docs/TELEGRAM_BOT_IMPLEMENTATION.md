@@ -36,7 +36,7 @@ https://<domain>/api/telegram            (api/telegram.js)
    |--- verify secret header
    |--- route update: inline_query | my_chat_member | message
    |--- read catalogue (lib/telegram.js) --> archive.org advancedsearch
-   |--- build buttons:  private -> web_app + url
+   |--- build buttons:  private -> web_app URLs with a screen route
    |                    group   -> url only
    v
 Telegram Bot API (sendMessage / answerInlineQuery)
@@ -192,6 +192,12 @@ See section 10. `/setinline` has no Bot API equivalent and blocks inline sharing
 | release link from channel | any chat | opens that exact release |
 
 Test in a throwaway group first, not the label chat.
+
+Private-chat buttons open the Mini App directly at the selected screen and
+request fullscreen when the Telegram client supports it. Group buttons remain
+`t.me` links because Telegram does not allow inline `web_app` buttons in groups.
+Telegram may still show client-controlled notices; a bot cannot suppress a
+required Telegram consent prompt.
 
 ---
 

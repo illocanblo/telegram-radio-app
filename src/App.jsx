@@ -4,7 +4,7 @@ import Stats from './Stats.jsx'
 import Links from './Links.jsx'
 import { analytics } from './analytics.js'
 import {
-  readStartParam, routeFromParam, readRoute, writeRoute,
+  readStartParam, routeFromParam, filtersForDeepLink, readRoute, writeRoute,
   paramForAlbum, directLink, webLink, getLinkConfig, copyText,
 } from './deeplink.js'
 import {
@@ -660,6 +660,11 @@ export default function App() {
   useEffect(() => onFullscreenChange(() => setFullscreen(isFullscreen())), [])
 
   useEffect(() => {
+    const wantsFullscreen = new URLSearchParams(window.location.search).get('tgFullscreen') === '1'
+    if (wantsFullscreen && caps.fullscreen && !isFullscreen()) toggleFullscreen()
+  }, [caps.fullscreen])
+
+  useEffect(() => {
     if (!caps.homeScreen) return
     let alive = true
     homeScreenStatus().then((s) => { if (alive) setHomeStatus(s) })
@@ -908,9 +913,12 @@ export default function App() {
       setRoute(initial)
     }
 
-    if (!ownerInitial && initial.action === 'fav') setFavOnly(true)
-    if (!ownerInitial && initial.action === 'decade') setEra(String(initial.value))
-    if (!ownerInitial && initial.action === 'search') setQuery(String(initial.value || ''))
+    const filters = ownerInitial ? null : filtersForDeepLink(initial)
+    if (filters) {
+      setFavOnly(filters.favOnly)
+      setEra(filters.era)
+      setQuery(filters.query)
+    }
     if (!ownerInitial && initial.action === 'radio') setRadioRequested(true)
     if (!ownerInitial && initial.name === 'album' && initial.id) {
       viewAlbumIdRef.current = initial.id

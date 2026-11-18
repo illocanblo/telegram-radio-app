@@ -74,6 +74,15 @@ export function routeFromParam(raw) {
   return null
 }
 
+export function filtersForDeepLink(route) {
+  if (route?.name !== 'library') return null
+  if (route.action === 'radio') return { favOnly: false, era: 'all', query: '' }
+  if (route.action === 'fav') return { favOnly: true, era: 'all', query: '' }
+  if (route.action === 'decade') return { favOnly: false, era: String(route.value), query: '' }
+  if (route.action === 'search') return { favOnly: false, era: 'all', query: String(route.value || '') }
+  return null
+}
+
 export function readStartParam() {
   const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : null
   const fromTg = tg?.initDataUnsafe?.start_param

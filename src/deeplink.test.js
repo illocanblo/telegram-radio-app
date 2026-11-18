@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PARAM_FAV,
   PARAM_RADIO,
+  filtersForDeepLink,
   paramForAlbum,
   paramForDecade,
   paramForQuery,
@@ -29,6 +30,19 @@ describe('Telegram deep-link parameters', () => {
   it('recognizes radio and favorites actions', () => {
     expect(routeFromParam(PARAM_RADIO)).toEqual({ name: 'library', id: null, action: 'radio' })
     expect(routeFromParam(PARAM_FAV)).toEqual({ name: 'library', id: null, action: 'fav' })
+  })
+
+  it('resets incompatible saved filters when opening radio or favorites', () => {
+    expect(filtersForDeepLink(routeFromParam(PARAM_RADIO))).toEqual({
+      favOnly: false,
+      era: 'all',
+      query: '',
+    })
+    expect(filtersForDeepLink(routeFromParam(PARAM_FAV))).toEqual({
+      favOnly: true,
+      era: 'all',
+      query: '',
+    })
   })
 
   it('recognizes decade filters', () => {
