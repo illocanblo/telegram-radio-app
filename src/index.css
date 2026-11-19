@@ -774,6 +774,7 @@ body {
   .p-cover-btn { width: 48px; height: 48px; }
   .p-title { font-size: 13px; }
   .p-center { gap: 10px; }
+  .p-seek-row { order: -1; }
   .p-time { min-width: 30px; font-size: 10.5px; }
   .vol input[type='range'] { display: none; }
   .resume-word { display: none; }
