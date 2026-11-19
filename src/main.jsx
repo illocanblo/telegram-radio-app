@@ -36,7 +36,7 @@ function applyInsets() {
 
   if (c && (c.top || c.bottom || c.left || c.right)) {
     top = c.top || 0
-    bottom = c.bottom || 0
+    bottom = Math.max(safe.bottom || 0, c.bottom || 0)
   } else {
     top = (safe.top || 0) + HEADER_ALLOWANCE
     bottom = safe.bottom || 0
